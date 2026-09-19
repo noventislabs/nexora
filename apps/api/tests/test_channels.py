@@ -6,7 +6,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nexora.db.models import AuditLog, AutomationSettings, Channel, ChannelSettings, YouTubeConnection
+from nexora.db.models import (
+    AuditLog,
+    AutomationSettings,
+    Channel,
+    ChannelSettings,
+    YouTubeConnection,
+)
 from nexora.services import channels as channel_service
 
 

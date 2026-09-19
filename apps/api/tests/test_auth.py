@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nexora.core.crypto import token_fingerprint
+from nexora.core.errors import AuthenticationRequired
 from nexora.core.passwords import hash_password, verify_password
 from nexora.db.models import AuthSession, User
 from nexora.services import auth as auth_service
@@ -137,5 +138,5 @@ def test_revoke_all_sessions(db: Session, user: User) -> None:
     auth_service.issue_session(db, user)
     auth_service.issue_session(db, user)
     assert auth_service.revoke_all_sessions(db, user.id) == 2
-    with pytest.raises(Exception):
+    with pytest.raises(AuthenticationRequired):
         auth_service.resolve_session(db, "nonexistent-token")
