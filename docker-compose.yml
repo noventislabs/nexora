@@ -1,0 +1,82 @@
+# NEXORA AI AUTOPILOT — local development stack.
+# Copy .env.example to .env first; every service reads its configuration from it.
+name: nexora
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nexora
+      POSTGRES_PASSWORD: nexora
+      POSTGRES_DB: nexora
+    ports: ["5432:5432"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexora -d nexora"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Tuned down for an 8 GB development machine.
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=50"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+psycopg://nexora:nexora@postgres:5432/nexora
+      REDIS_URL: redis://redis:6379/0
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    volumes:
+      - media-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/system/health', timeout=5).status==200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    command: ["python", "-m", "nexora.queue.worker"]
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+psycopg://nexora:nexora@postgres:5432/nexora
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    volumes:
+      - media-data:/app/data
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    environment:
+      API_BASE_URL: http://api:8000
+      NODE_ENV: production
+    ports: ["3000:3000"]
+    depends_on:
+      api: {condition: service_started}
+
+volumes:
+  postgres-data:
+  media-data:

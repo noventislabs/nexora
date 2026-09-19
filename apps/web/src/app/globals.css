@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+/*
+ * NEXORA command-center palette. Dark by default, original to this product —
+ * a cool slate base with a single cyan accent for state and a warm amber used
+ * exclusively for "needs attention".
+ */
+@theme {
+  --color-base-950: #070a0f;
+  --color-base-900: #0b1017;
+  --color-base-850: #10161f;
+  --color-base-800: #151d28;
+  --color-base-700: #1e2836;
+  --color-base-600: #2b3848;
+  --color-base-500: #475568;
+  --color-base-400: #6b7a8f;
+  --color-base-300: #94a3b8;
+  --color-base-200: #cbd5e1;
+  --color-base-100: #e6edf5;
+
+  --color-accent-500: #22d3ee;
+  --color-accent-600: #06b6d4;
+  --color-accent-400: #67e8f9;
+
+  --color-ok-500: #34d399;
+  --color-warn-500: #fbbf24;
+  --color-danger-500: #f87171;
+  --color-idle-500: #64748b;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-base-950);
+  color: var(--color-base-200);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Animation is kept minimal deliberately: the target dev machine is an i3/8 GB. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-base-900);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-base-700);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-base-600);
+}
