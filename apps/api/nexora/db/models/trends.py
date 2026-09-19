@@ -169,6 +169,59 @@ class TopicResearch(Base, TimestampMixin):
     uncertainties: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     conflicts: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
 
+    #: Counted, never estimated: how much real material this research stands on.
+    document_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    started_at = utc_column()
+    finished_at = utc_column()
+
     provider: Mapped[str | None] = mapped_column(String(48))
     model: Mapped[str | None] = mapped_column(String(96))
     error: Mapped[str | None] = mapped_column(Text)
+
+
+class ResearchDocument(Base):
+    """A single piece of source material a research run actually had in hand.
+
+    Every document records where it came from and whether fetching it was permitted.
+    ``fetch_decision`` is never assumed: a URL is only retrieved after its host's
+    robots.txt has been consulted, and a refusal is stored as a refusal.
+    """
+
+    __tablename__ = "research_documents"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    research_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("topic_research.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    channel_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("channels.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    trending_topic_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("trending_topics.id", ondelete="SET NULL"), index=True
+    )
+
+    #: trend_item | operator | fetched
+    origin: Mapped[str] = mapped_column(String(32), nullable=False, default="trend_item")
+    url: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    publisher: Mapped[str | None] = mapped_column(String(255))
+    author: Mapped[str | None] = mapped_column(String(255))
+    published_at = utc_column()
+
+    #: The text the model was actually shown. Bounded, and never silently truncated
+    #: without ``truncated`` recording it.
+    text: Mapped[str | None] = mapped_column(Text)
+    word_count: Mapped[int | None] = mapped_column(Integer)
+    truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    fetched_at = utc_column()
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    content_type: Mapped[str | None] = mapped_column(String(128))
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64))
+
+    #: ALLOWED | BLOCKED_BY_ROBOTS | NOT_ATTEMPTED | DISABLED | FAILED
+    fetch_decision: Mapped[str] = mapped_column(String(32), nullable=False, default="NOT_ATTEMPTED")
+    fetch_note: Mapped[str | None] = mapped_column(Text)
+    license_note: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at = utc_column(nullable=False)

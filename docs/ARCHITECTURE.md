@@ -159,6 +159,64 @@ The LLM proposes an editorial angle; everything checkable is computed in code:
 With no LLM configured, `POST /api/topics/generate` returns HTTP 503
 `provider_not_configured`. There is no offline idea generator.
 
+## Content intelligence
+
+### Research
+
+A research run assembles its documents **first**, then shows the model exactly those
+documents and nothing else.
+
+Source material comes from the trend rows a candidate cites, plus their corroborating
+rows. Where the channel has enabled `research_full_text_enabled`, the linked page is
+also retrieved — but only after `robots.txt` has been consulted for our user agent, and
+only up to a bounded excerpt (20k characters). Every outcome is stored on
+`research_documents.fetch_decision`: `ALLOWED`, `BLOCKED_BY_ROBOTS`, `DISABLED`,
+`NOT_ATTEMPTED` or `FAILED`. A refusal is recorded as a refusal.
+
+Operator-supplied URLs are fetched server-side, so `validate_source_url` rejects
+non-http schemes and any host that resolves to a private, loopback, link-local or
+reserved address — including cloud metadata endpoints. Without that, a research source
+would be an SSRF primitive.
+
+What the model returns is then checked:
+
+| Rule | Enforcement |
+|---|---|
+| Every fact, claim and statistic cites documents | Citations resolved by index; unresolvable ones are **dropped** |
+| A citation only counts if the document carried text | `_resolve_indices` requires non-empty text |
+| Classification is one of five values | Constrained to `FACT`/`CLAIM`/`ANALYSIS`/`OPINION`/`UNKNOWN` |
+| An unsupported statement cannot be a FACT | Demoted to `UNKNOWN` regardless of the model's label |
+| Conflicts are preserved | A conflict needs **two** independently cited positions, or it is dropped |
+
+### Scripts
+
+Every generation writes a new immutable `script_versions` row; nothing is overwritten,
+so an earlier draft can always be reselected.
+
+`estimated_duration_seconds` is derived from the word count at 150 wpm and is labelled
+as an estimate everywhere it appears — it is not a measurement of the finished video.
+
+**Originality** is checked by comparing normalized 9-word n-grams of the narration
+against the stored source excerpts, reporting an overlap ratio, the longest verbatim
+run and the matching spans. The result carries `conclusive: false` when no comparison
+was possible (no source text, or narration shorter than the window), because a perfect
+score with nothing to compare against is not evidence of originality. The `scope`
+string states plainly that this is a check against what was actually read, not against
+the whole web.
+
+### Fact check
+
+The model extracts assertions and proposes citations; the **verdict is computed here**:
+
+* `SUPPORTED` — cites at least one document that exists and carried text.
+* `UNSUPPORTED` — citations do not resolve, whatever the model claimed.
+* `NEEDS_REVIEW` — the model flagged it as overstated, or it touches a subject the
+  research recorded as contested.
+
+Status is `FAIL` if anything is unsupported, `REVIEW` if anything needs review, `PASS`
+otherwise. Extracting *no* checkable claims yields `REVIEW`, not `PASS` — unverified is
+not the same as verified. A `FAIL` never advances the pipeline on its own.
+
 ## Frontend
 
 Next.js App Router. The dashboard is deliberately light for an 8 GB / i3 machine:

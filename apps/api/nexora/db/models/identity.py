@@ -102,6 +102,12 @@ class ChannelSettings(Base, TimestampMixin):
     preferred_voice_id: Mapped[str | None] = mapped_column(String(128))
     editorial_notes: Mapped[str | None] = mapped_column(Text)
 
+    #: Off by default. When on, research may retrieve the pages its sources link to,
+    #: and only where the host's robots.txt permits it.
+    research_full_text_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Minimum documents a research run must stand on before it will produce a script.
+    research_min_documents: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+
     channel: Mapped[Channel] = relationship(back_populates="settings")
 
 

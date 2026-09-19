@@ -25,6 +25,24 @@ os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("STORAGE_BACKEND", "local")
 
+# Hermetic by construction: a developer's real .env must never change what the unit
+# suite asserts, and no test may reach a third party by accident. Tests that need a
+# credential set it explicitly with monkeypatch; the live integration tests read the
+# real value through `tests.live.live_credential` instead.
+for _credential in (
+    "YOUTUBE_API_KEY",
+    "YOUTUBE_CLIENT_ID",
+    "YOUTUBE_CLIENT_SECRET",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "REDDIT_CLIENT_ID",
+    "REDDIT_CLIENT_SECRET",
+    "LLM_PROVIDER",
+    "VOICE_PROVIDER",
+):
+    os.environ[_credential] = ""
+
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402

@@ -28,12 +28,24 @@ from nexora.services.providers.trends.base import (
 
 API_ROOT = "https://www.googleapis.com/youtube/v3"
 
-#: YouTube's own category ids, used to keep the scan on-topic.
+#: Maps NEXORA's channel categories onto YouTube's own video category ids, so a scan
+#: configured for a channel category actually filters. Keys must stay in step with
+#: ``nexora.services.channels.SUPPORTED_CATEGORIES``; an unmapped value raises rather
+#: than silently producing an unfiltered chart.
 CATEGORY_IDS = {
+    # Science & Technology
+    "technology": "28",
+    "ai": "28",
+    "science": "28",
+    "future": "28",
+    # News & Politics — where business and policy coverage actually lives on YouTube.
+    "business": "25",
+    "digital_economy": "25",
+    "global_developments": "25",
+    # Direct YouTube category names, for operators who prefer them.
     "science_technology": "28",
     "news_politics": "25",
     "education": "27",
-    "business": "28",
     "entertainment": "24",
 }
 
@@ -74,6 +86,8 @@ class YouTubeTrendProvider(TrendProvider):
                 missing=("query",),
                 detail="This source is in search mode but has no query configured.",
             )
+        if self.mode == "mostPopular":
+            self._params(1)  # raises ValidationError on an unmappable category
         return Availability(
             status=ComponentStatus.AVAILABLE,
             provider=self.name,
@@ -115,11 +129,21 @@ class YouTubeTrendProvider(TrendProvider):
                 "maxResults": capped,
                 "key": settings.youtube_api_key,
             }
-            category = self.config.get("category_id") or CATEGORY_IDS.get(
-                str(self.config.get("category", "")).lower()
-            )
-            if category:
-                params["videoCategoryId"] = str(category)
+            category_id = self.config.get("category_id")
+            if not category_id:
+                configured = str(self.config.get("category", "")).strip().lower()
+                if configured:
+                    category_id = CATEGORY_IDS.get(configured)
+                    if category_id is None:
+                        # Silently dropping the filter would return an unrelated chart
+                        # while appearing to have worked.
+                        raise ValidationError(
+                            f"No YouTube video category maps to '{configured}'. "
+                            f"Known values: {', '.join(sorted(CATEGORY_IDS))}. "
+                            "Set 'category_id' explicitly to use a category id directly."
+                        )
+            if category_id:
+                params["videoCategoryId"] = str(category_id)
             return params
 
         published_after = datetime.now(UTC) - timedelta(days=int(self.config.get("window_days", 7)))

@@ -154,3 +154,142 @@ REDDIT_LISTING = {
         ]
     },
 }
+
+
+# --------------------------------------------------------------- research fixtures
+SOURCE_PAGE_HTML = """<!DOCTYPE html>
+<html><head><title>TEST FIXTURE: fabrication capacity report</title>
+<script>var tracker = 1;</script><style>body{color:#000}</style></head>
+<body>
+<h1>Fabrication capacity report</h1>
+<p>The regional foundry added 40,000 wafer starts per month in the second quarter,
+according to the industry association.</p>
+<p>A second association disputes the figure and places the addition nearer 25,000.</p>
+<p>Both groups agree that packaging capacity remains the binding constraint.</p>
+</body></html>
+"""
+
+ROBOTS_ALLOW_ALL = "User-agent: *\nAllow: /\n"
+ROBOTS_DISALLOW_ALL = "User-agent: *\nDisallow: /\n"
+
+RESEARCH_RESPONSE = {
+    "summary": "Two industry associations report different wafer-start additions; both agree "
+    "packaging is the binding constraint.",
+    "key_facts": [
+        {
+            "statement": "Packaging capacity is described as the binding constraint.",
+            "classification": "FACT",
+            "document_indices": [0],
+        }
+    ],
+    "claims": [
+        {
+            "statement": "The regional foundry added 40,000 wafer starts per month in Q2.",
+            "classification": "CLAIM",
+            "attributed_to": "the industry association",
+            "document_indices": [0],
+        },
+        {
+            "statement": "A competitor will exit the market next year.",
+            "classification": "FACT",
+            "document_indices": [],
+        },
+    ],
+    "statistics": [
+        {
+            "value": "40,000",
+            "what_it_measures": "wafer starts added per month",
+            "as_of": "2026-Q2",
+            "document_indices": [0],
+        },
+        {
+            "value": "83%",
+            "what_it_measures": "market share, not present in any document",
+            "as_of": None,
+            "document_indices": [7],
+        },
+    ],
+    "entities": {"organizations": ["Industry Association"], "people": [], "places": ["region"]},
+    "conflicts": [
+        {
+            "subject": "size of the wafer-start addition",
+            "positions": [
+                {"position": "about 40,000 per month", "document_indices": [0]},
+                {"position": "nearer 25,000 per month", "document_indices": [1]},
+            ],
+        },
+        {
+            "subject": "conflict with only one sourced position",
+            "positions": [{"position": "only side", "document_indices": [0]}],
+        },
+    ],
+    "uncertainties": ["Whether packaging capacity expands in the next two quarters."],
+}
+
+SCRIPT_RESPONSE = {
+    "sections": [
+        {
+            "kind": "hook",
+            "heading": "Opening",
+            "narration": "Two industry bodies looked at the same quarter and came away with "
+            "very different numbers.",
+            "document_indices": [0],
+        },
+        {
+            "kind": "evidence",
+            "heading": "What the associations say",
+            "narration": "One association puts the monthly addition near forty thousand wafer "
+            "starts. Another places it closer to twenty-five thousand. Both agree that packaging "
+            "is what actually limits output.",
+            "document_indices": [0, 1],
+        },
+        {
+            "kind": "conclusion",
+            "heading": "Where that leaves us",
+            "narration": "Until the two counts are reconciled, the honest answer is that the "
+            "scale of the addition is disputed.",
+            "document_indices": [0, 99],
+        },
+    ],
+    "notes": "Mention the dispute explicitly rather than averaging the figures.",
+}
+
+FACT_CHECK_RESPONSE = {
+    "claims": [
+        {
+            "assertion": "Packaging is the binding constraint on output.",
+            "narration_sentence": "Both agree that packaging is what actually limits output.",
+            "document_indices": [0],
+            "overstated": False,
+            "note": None,
+        },
+        {
+            "assertion": "The addition was exactly 40,000 wafer starts.",
+            "narration_sentence": "One association puts the monthly addition near forty thousand.",
+            "document_indices": [0],
+            "overstated": True,
+            "note": "The research records this as a disputed claim, not a settled figure.",
+        },
+        {
+            "assertion": "A competitor will exit the market next year.",
+            "narration_sentence": "A competitor is leaving the market.",
+            "document_indices": [],
+            "overstated": False,
+            "note": None,
+        },
+    ],
+    "unverified_specifics": ["next year"],
+}
+
+FACT_CHECK_ALL_SUPPORTED = {
+    "claims": [
+        {
+            "assertion": "Packaging is the binding constraint on output.",
+            "narration_sentence": "Both agree that packaging is what actually limits output.",
+            "document_indices": [0],
+            "overstated": False,
+            "note": None,
+        }
+    ],
+    "unverified_specifics": [],
+}

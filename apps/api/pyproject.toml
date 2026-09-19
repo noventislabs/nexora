@@ -38,8 +38,13 @@ include = ["nexora*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# Live tests call real third-party APIs and are excluded by default. Run them with
+# `pytest -m live`; they skip themselves when no credential is configured.
+addopts = "-q -m 'not live'"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "live: calls a real external API; requires a credential and network access",
+]
 
 [tool.ruff]
 line-length = 100

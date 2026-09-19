@@ -104,7 +104,6 @@ the full list; the essentials are:
 | `LLM_PROVIDER` + key | Topics, research, scripts, fact check | Those features report `NOT CONFIGURED` |
 | `VOICE_PROVIDER` + key | Narration | `VOICE PROVIDER NOT CONFIGURED` |
 | `YOUTUBE_CLIENT_ID/SECRET` | Channel OAuth | Cannot connect a channel |
-| `YOUTUBE_API_KEY` | Public trend reads | YouTube trend source unavailable |
 
 Never commit `.env`; it is git-ignored, and `.env.example` contains placeholders only.
 
@@ -132,6 +131,12 @@ it does *not* silently re-enable automation.
 make test        # backend (pytest) + frontend (vitest)
 make lint        # ruff + tsc --noEmit
 ```
+
+The unit suite is hermetic: `conftest` blanks every third-party credential, so a local
+`.env` can never change what it asserts and no test reaches a third party by accident.
+
+Tests that *do* call a real API are marked `live` and excluded by default. Run them
+with `pytest -m live`; each one skips itself when its credential is absent.
 
 Backend tests run against real PostgreSQL and real Redis, and build the schema from the
 actual Alembic migration. Only outbound third-party HTTP is intercepted, and every such

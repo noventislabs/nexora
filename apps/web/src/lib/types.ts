@@ -307,3 +307,157 @@ export type ScoringModel = {
   velocity_reference_per_hour: Record<string, number>;
   components: Record<string, string>;
 };
+
+// -------------------------------------------------------------------- research
+
+export type Classification = "FACT" | "CLAIM" | "ANALYSIS" | "OPINION" | "UNKNOWN";
+
+export type ResearchStatement = {
+  statement: string;
+  classification: Classification;
+  document_indices: number[];
+  attributed_to?: string;
+};
+
+export type ResearchDocument = {
+  index: number;
+  id: string;
+  origin: string;
+  title: string;
+  url: string | null;
+  publisher: string | null;
+  author: string | null;
+  published_at: string | null;
+  fetched_at: string | null;
+  /** ALLOWED | BLOCKED_BY_ROBOTS | NOT_ATTEMPTED | DISABLED | FAILED */
+  fetch_decision: string;
+  fetch_note: string | null;
+  http_status: number | null;
+  word_count: number | null;
+  truncated: boolean;
+  has_text: boolean;
+  error: string | null;
+};
+
+export type ResearchConflict = {
+  subject: string;
+  positions: { position: string; document_indices: number[] }[];
+};
+
+export type Research = {
+  id: string;
+  topic_candidate_id: string;
+  status: string;
+  summary: string | null;
+  key_facts: ResearchStatement[];
+  claims: ResearchStatement[];
+  statistics: {
+    value: string;
+    what_it_measures: string;
+    as_of: string | null;
+    document_indices: number[];
+  }[];
+  entities: Record<string, string[]>;
+  conflicts: ResearchConflict[];
+  uncertainties: string[];
+  sources: { index: number; title: string; url: string | null; publisher: string | null }[];
+  document_count: number;
+  provider: string | null;
+  model: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+  documents?: ResearchDocument[];
+};
+
+// --------------------------------------------------------------------- content
+
+export type ContentProject = {
+  id: string;
+  channel_id: string;
+  title: string;
+  status: string;
+  video_format: "long_form" | "short";
+  target_duration_seconds: number;
+  language: string;
+  topic_candidate_id: string | null;
+  research_id: string | null;
+  current_script_version_id: string | null;
+  approval_status: string;
+  approved_at: string | null;
+  rejection_reason: string | null;
+  last_error: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type ScriptSection = {
+  kind: string;
+  heading: string;
+  narration: string;
+  document_indices: number[];
+};
+
+export type ScriptVersion = {
+  id: string;
+  version: number;
+  word_count: number;
+  estimated_duration_seconds: number;
+  /** Explains that the runtime is derived, not measured. */
+  duration_basis: string;
+  provider: string | null;
+  model: string | null;
+  created_at: string | null;
+  notes: string | null;
+  section_count: number;
+  source_references: { index: number; title: string; url: string | null }[];
+  sections?: ScriptSection[];
+  narration_text?: string;
+  plain_text?: string;
+};
+
+export type Originality = {
+  score: number;
+  checked_documents: number;
+  longest_verbatim_run_words: number;
+  overlap_ratio?: number;
+  matches: { document_index: number; words: number; excerpt: string }[];
+  scope: string;
+  /** False when no meaningful comparison was possible — not a pass. */
+  conclusive: boolean;
+};
+
+export type FactCheckClaim = {
+  assertion: string;
+  narration_sentence: string | null;
+  document_indices: number[];
+  verdict: "SUPPORTED" | "NEEDS_REVIEW" | "UNSUPPORTED";
+  reasons: string[];
+};
+
+export type FactCheck = {
+  id: string;
+  status: "PASS" | "REVIEW" | "FAIL" | "NOT_RUN";
+  script_version_id: string | null;
+  supported: number;
+  needs_review: number;
+  unsupported: number;
+  claims: FactCheckClaim[];
+  contradictions: { kind: string; subject?: string; detail?: string; note?: string }[];
+  provider: string | null;
+  model: string | null;
+  created_at: string | null;
+  blocks_publishing: boolean;
+};
+
+export type ProjectDetail = ContentProject & {
+  research: Research | null;
+  script: {
+    current_version: number;
+    status: string;
+    versions: ScriptVersion[];
+    current: ScriptVersion | null;
+  };
+  fact_check: FactCheck | null;
+};

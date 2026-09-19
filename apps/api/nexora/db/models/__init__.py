@@ -28,7 +28,13 @@ from nexora.db.models.publishing import (
     YouTubeVideo,
 )
 from nexora.db.models.system import AuditLog, AutomationRun, Job, JobLog, SystemSetting
-from nexora.db.models.trends import TopicCandidate, TopicResearch, TrendingTopic, TrendSource
+from nexora.db.models.trends import (
+    ResearchDocument,
+    TopicCandidate,
+    TopicResearch,
+    TrendingTopic,
+    TrendSource,
+)
 
 __all__ = [
     "AnalyticsSnapshot",
@@ -51,6 +57,7 @@ __all__ = [
     "PerformanceObservation",
     "PublishJob",
     "QualityCheck",
+    "ResearchDocument",
     "ScriptVersion",
     "SystemSetting",
     "Thumbnail",
