@@ -75,7 +75,14 @@ class VoiceJob(Base):
         ForeignKey("video_assets.id", ondelete="SET NULL")
     )
     character_count: Mapped[int | None] = mapped_column(Integer)
+    #: Measured with ffprobe from the produced file, not estimated from the text.
     duration_seconds: Mapped[float | None] = mapped_column(Float)
+    #: 'provider' when the synthesizer returned real timings, 'estimated' when they
+    #: were derived by distributing the measured duration across the text.
+    timing_source: Mapped[str | None] = mapped_column(String(16))
+    #: Per-segment timings actually used for subtitles.
+    segments: Mapped[list[Any] | None] = mapped_column(JSONB)
+    mime_type: Mapped[str | None] = mapped_column(String(64))
     error: Mapped[str | None] = mapped_column(Text)
     created_at = utc_column(nullable=False)
     started_at = utc_column()
@@ -122,6 +129,10 @@ class VideoRenderJob(Base):
     )
     ffmpeg_version: Mapped[str | None] = mapped_column(String(128))
     command_digest: Mapped[str | None] = mapped_column(String(64))
+    #: Measured from the finished file with ffprobe.
+    duration_seconds: Mapped[float | None] = mapped_column(Float)
+    resolution: Mapped[str | None] = mapped_column(String(16))
+    output_bytes: Mapped[int | None] = mapped_column(BigInteger)
     log_excerpt: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
     started_at = utc_column()
@@ -146,6 +157,8 @@ class Thumbnail(Base):
     headline: Mapped[str | None] = mapped_column(String(120))
     prompt: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="generated", index=True)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
     decided_at = utc_column()
     decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     error: Mapped[str | None] = mapped_column(Text)

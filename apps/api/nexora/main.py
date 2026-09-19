@@ -19,6 +19,7 @@ from nexora.api.routes import auth as auth_routes
 from nexora.api.routes import channels as channel_routes
 from nexora.api.routes import content as content_routes
 from nexora.api.routes import dashboard as dashboard_routes
+from nexora.api.routes import media as media_routes
 from nexora.api.routes import system as system_routes
 from nexora.api.routes import trends as trend_routes
 from nexora.config import settings
@@ -98,6 +99,10 @@ def create_app() -> FastAPI:
     app.include_router(content_routes.projects_router)
     app.include_router(content_routes.scripts_router)
     app.include_router(content_routes.factcheck_router)
+    app.include_router(media_routes.voice_router)
+    app.include_router(media_routes.assets_router)
+    app.include_router(media_routes.video_router)
+    app.include_router(media_routes.thumbnails_router)
 
     @app.get("/api/health", tags=["system"], include_in_schema=False)
     def health_alias() -> dict[str, Any]:

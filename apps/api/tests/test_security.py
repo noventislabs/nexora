@@ -121,10 +121,43 @@ def test_unknown_body_fields_are_rejected(auth_client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_ffmpeg_arguments_reject_shell_metacharacters() -> None:
+def test_ffmpeg_arguments_reject_remote_and_chaining_protocols() -> None:
+    """FFmpeg's own protocol handling is the real risk, not shell metacharacters.
+
+    The process is spawned with shell=False, so ';' in an argv entry is inert. It is
+    also required syntax in a -filter_complex graph, which is why it is not filtered.
+    """
     from nexora.services.ffmpeg_runtime import validate_args
 
+    # Legitimate filter-graph syntax must pass.
     validate_args(["-i", "input.mp4", "-c:v", "libx264"])
-    for bad in ("a; rm -rf /", "a | cat", "$(whoami)", "a && b", "a`b`"):
+    validate_args(["-filter_complex", "[0]drawtext=text=x:fontsize=12[a];[a]null[out]"])
+
+    for dangerous in (
+        "http://evil.invalid/payload.mp4",
+        "https://evil.invalid/payload.mp4",
+        "file:/etc/passwd",
+        "concat:/etc/passwd|/etc/shadow",
+        "subfile:,start,0,end,100,:/etc/passwd",
+        "data:text/plain;base64,AAAA",
+        "pipe:0",
+        "rtmp://evil.invalid/live",
+    ):
         with pytest.raises(ValidationError):
-            validate_args(["-i", bad])
+            validate_args(["-i", dangerous])
+
+
+def test_ffmpeg_arguments_reject_control_characters() -> None:
+    from nexora.services.ffmpeg_runtime import validate_args
+
+    for dangerous in ("input\x00.mp4", "input\n-i\n/etc/passwd", "a\rb"):
+        with pytest.raises(ValidationError):
+            validate_args(["-i", dangerous])
+
+
+def test_ffmpeg_protocol_check_catches_quoted_paths() -> None:
+    """A protocol hidden inside a quoted filter option must still be refused."""
+    from nexora.services.ffmpeg_runtime import validate_args
+
+    with pytest.raises(ValidationError):
+        validate_args(["-filter_complex", "subtitles='http://evil.invalid/x.srt'"])

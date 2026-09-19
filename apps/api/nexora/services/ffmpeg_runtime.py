@@ -27,9 +27,24 @@ logger = get_logger(__name__)
 
 _VERSION_RE = re.compile(r"ffmpeg version (\S+)")
 
-# Flags that would let a caller read or write outside the render sandbox, execute
-# arbitrary protocols, or shell out. None of these may ever appear in a built command.
-FORBIDDEN_ARG_TOKENS = ("|", ";", "&&", "`", "$(", "\n", "\r")
+# FFmpeg is always executed with ``shell=False``, so shell metacharacters are inert —
+# an argv entry containing ";" is passed to execve verbatim and cannot start a second
+# command. Filtering them would be security theatre and would break legitimate syntax:
+# ";" separates links in a -filter_complex graph, and ":" separates filter options.
+#
+# What *is* dangerous is FFmpeg's own protocol handling. A path-looking argument can
+# reach the network, read an arbitrary local file, or chain inputs. Every file NEXORA
+# hands FFmpeg is a local path inside the render working directory, so any protocol
+# prefix indicates either a bug or an injection attempt.
+FORBIDDEN_PROTOCOL_PREFIXES = (
+    "http://", "https://", "ftp://", "ftps://", "tcp://", "udp://", "rtp://", "rtmp://",
+    "rtsp://", "srt://", "sftp://", "gopher://", "data:", "file:", "pipe:", "concat:",
+    "subfile:", "async:", "cache:", "crypto:", "unix://",
+)
+
+# Argument hygiene: a null byte truncates the string at the execve boundary, and a
+# newline breaks any argument file or log line that later carries it.
+FORBIDDEN_CONTROL_CHARACTERS = ("\x00", "\n", "\r")
 
 
 class FFmpegUnavailable(ProviderNotConfigured):
@@ -113,13 +128,32 @@ def require_ffmpeg() -> FFmpegInfo:
 
 
 def validate_args(args: list[str]) -> None:
-    """Reject anything that could escape the intended FFmpeg invocation."""
+    """Reject arguments that could make FFmpeg read or write somewhere unintended.
+
+    This does not filter shell metacharacters — see the note on
+    :data:`FORBIDDEN_PROTOCOL_PREFIXES` for why that would be theatre here. The real
+    guarantee comes from two properties held by construction:
+
+    * every argument is built by NEXORA from validated values, and
+    * all operator- or model-supplied text reaches FFmpeg through ``textfile=`` and
+      ``subtitles=`` file references, never interpolated into the filter graph.
+    """
     for arg in args:
         if not isinstance(arg, str):
             raise ValidationError("FFmpeg arguments must be strings.")
-        for token in FORBIDDEN_ARG_TOKENS:
-            if token in arg:
-                raise ValidationError(f"FFmpeg argument contains a forbidden token: {token!r}")
+        for character in FORBIDDEN_CONTROL_CHARACTERS:
+            if character in arg:
+                raise ValidationError(
+                    "FFmpeg argument contains a control character "
+                    f"({character!r}) and was refused."
+                )
+        lowered = arg.lower()
+        for prefix in FORBIDDEN_PROTOCOL_PREFIXES:
+            if lowered.startswith(prefix) or f"'{prefix}" in lowered or f'"{prefix}' in lowered:
+                raise ValidationError(
+                    f"FFmpeg argument uses the '{prefix}' protocol. NEXORA only ever "
+                    "passes local paths inside the render working directory."
+                )
 
 
 def run_ffmpeg(args: list[str], *, timeout: int = 3600, cwd: Path | None = None) -> str:

@@ -217,6 +217,79 @@ Status is `FAIL` if anything is unsupported, `REVIEW` if anything needs review, 
 otherwise. Extracting *no* checkable claims yields `REVIEW`, not `PASS` — unverified is
 not the same as verified. A `FAIL` never advances the pipeline on its own.
 
+## Media production
+
+### Voice
+
+Two adapters, and the difference between them is carried through the whole pipeline:
+
+| Provider | Timings | Quota |
+|---|---|---|
+| `openai` | **None** — the audio endpoint returns audio only | Not exposed by the API; reported as such |
+| `elevenlabs` | **Character-level**, via `with-timestamps` | Real, from `/user/subscription` |
+
+Narration longer than a provider's per-request cap is split on sentence boundaries,
+synthesized chunk by chunk, and concatenated with FFmpeg's concat demuxer. Where a
+provider returns timings, each chunk's alignment is offset by the *measured* duration
+of the chunks before it, so multi-chunk narration keeps real timings end to end.
+
+Duration is always measured with `ffprobe` from the produced file. The script's
+`estimated_duration_seconds` is a separate, clearly-labelled figure and is never
+substituted for it.
+
+### Subtitles
+
+`timing_source` is either `provider` or `estimated`, and it propagates to the scene
+plan, the render job, the WebVTT file (as a `NOTE` block) and the UI badge. Estimated
+timing spreads the measured duration across cues in proportion to character count —
+an approximation, labelled as one. If a provider's alignment cannot be walked cleanly,
+the code falls back to estimation rather than emitting subtitles that drift.
+
+### Scenes
+
+One scene per script section, timed from the cues. Sections and cues describe the same
+narration in the same order, so both are laid on one character axis and each cue goes
+to the section containing its midpoint. The plan always covers exactly the audio that
+exists — no gaps, no overrun.
+
+### Rendering
+
+FFmpeg composes a generated gradient background, per-scene typography and (optionally)
+burned-in captions with the narration track, encoding H.264 + AAC at CRF 23.
+
+Two security properties hold by construction:
+
+* FFmpeg is spawned with `shell=False` and an argument vector. Shell metacharacters are
+  therefore **inert**, and `validate_args` does not filter them — `;` is required
+  `-filter_complex` syntax. What it *does* reject is FFmpeg's own protocol handling
+  (`http://`, `file:`, `concat:`, `subfile:`, `pipe:` …) and control characters, since
+  every path NEXORA passes is a local file in the render working directory.
+* All on-screen text reaches FFmpeg through `textfile=` and `subtitles=` file
+  references. No heading or caption is ever interpolated into the filter graph, so no
+  caption can alter it.
+
+Without FFmpeg the render is refused with `FFMPEG UNAVAILABLE`. No placeholder file is
+ever written.
+
+### Assets and licensing
+
+Uploads are validated by **magic bytes**, not by filename or declared content type — a
+PHP script named `photo.png` is rejected. `license_status` defaults to
+`LICENSE UNKNOWN`, and anything other than `PERMITTED` sets
+`blocks_autonomous_publishing`. A composite inherits the *least* permitted status of
+its inputs, so a thumbnail built over an unknown-licence background is itself unknown.
+
+Assets are content-addressed by SHA-256, so identical bytes are stored once. Downloads
+are served `Content-Disposition: attachment` with `nosniff`, so an uploaded SVG or HTML
+file can never execute on the application origin.
+
+### Thumbnails
+
+A real 1280×720 PNG composited with Pillow from channel branding and, optionally, an
+operator-supplied background. Every candidate is kept and one must be approved before
+it becomes the project's thumbnail. The output carries an explicit note that NEXORA
+makes no claim about how it will perform — no CTR is predicted, estimated or implied.
+
 ## Frontend
 
 Next.js App Router. The dashboard is deliberately light for an 8 GB / i3 machine:

@@ -461,3 +461,126 @@ export type ProjectDetail = ContentProject & {
   };
   fact_check: FactCheck | null;
 };
+
+// ----------------------------------------------------------------------- media
+
+export type VoiceStatus = Availability & {
+  voices: { id: string; name: string; languages: string[] }[];
+  provides_timings?: boolean;
+  status_detail: {
+    provider: string;
+    model?: string;
+    quota: {
+      characters_used: number | null;
+      character_limit: number | null;
+      characters_remaining: number | null;
+      tier?: string | null;
+    } | null;
+    quota_note?: string;
+  } | null;
+};
+
+export type VoiceJob = {
+  id: string;
+  status: "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
+  provider: string | null;
+  voice_id: string | null;
+  language: string;
+  audio_asset_id: string | null;
+  character_count: number | null;
+  duration_seconds: number | null;
+  /** Says the duration was measured, not estimated. Null when unmeasured. */
+  duration_basis: string | null;
+  timing_source: "provider" | "estimated" | null;
+  timing_is_estimated: boolean;
+  cue_count: number;
+  mime_type: string | null;
+  error: string | null;
+  created_at: string | null;
+  finished_at: string | null;
+};
+
+export type MediaAsset = {
+  id: string;
+  kind: string;
+  source: string;
+  source_url: string | null;
+  source_provider: string | null;
+  license_type: string | null;
+  license_status: "PERMITTED" | "LICENSE UNKNOWN" | "PROHIBITED";
+  license_url: string | null;
+  attribution: string | null;
+  usage_permission_note: string | null;
+  acquired_at: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  checksum_sha256: string | null;
+  width: number | null;
+  height: number | null;
+  duration_seconds: number | null;
+  content_project_id: string | null;
+  created_at: string | null;
+  /** True whenever the licence is anything other than PERMITTED. */
+  blocks_autonomous_publishing: boolean;
+};
+
+export type AssetListing = Paged<MediaAsset> & {
+  kinds: string[];
+  license_types: string[];
+};
+
+export type RenderJob = {
+  id: string;
+  status: "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
+  progress_percent: number;
+  output_asset_id: string | null;
+  subtitle_asset_id: string | null;
+  duration_seconds: number | null;
+  duration_basis: string | null;
+  resolution: string | null;
+  output_bytes: number | null;
+  ffmpeg_version: string | null;
+  command_digest: string | null;
+  error: string | null;
+  log_excerpt: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type Scene = {
+  index: number;
+  kind: string;
+  heading: string;
+  start: number;
+  end: number;
+  duration: number;
+  cue_indices: number[];
+  document_indices: number[];
+  background_asset_id: string | null;
+};
+
+export type RenderListing = {
+  items: RenderJob[];
+  total: number;
+  scene_plan: Scene[];
+  aspect_ratio?: string;
+  resolution?: string;
+  subtitle_burn_in?: boolean;
+};
+
+export type ProjectThumbnail = {
+  id: string;
+  asset_id: string | null;
+  generator: string;
+  concept: string | null;
+  headline: string | null;
+  status: "generated" | "approved" | "rejected";
+  width: number | null;
+  height: number | null;
+  error: string | null;
+  created_at: string | null;
+  decided_at: string | null;
+  license_status?: string;
+  size_bytes?: number | null;
+  mime_type?: string | null;
+};

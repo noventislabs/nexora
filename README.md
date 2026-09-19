@@ -103,6 +103,7 @@ the full list; the essentials are:
 | `ENCRYPTION_KEY` | Encrypts OAuth tokens at rest | YouTube connection blocked |
 | `LLM_PROVIDER` + key | Topics, research, scripts, fact check | Those features report `NOT CONFIGURED` |
 | `VOICE_PROVIDER` + key | Narration | `VOICE PROVIDER NOT CONFIGURED` |
+| `FFMPEG_BINARY` | Video rendering | `FFMPEG UNAVAILABLE` — no placeholder video is written |
 | `YOUTUBE_CLIENT_ID/SECRET` | Channel OAuth | Cannot connect a channel |
 
 Never commit `.env`; it is git-ignored, and `.env.example` contains placeholders only.

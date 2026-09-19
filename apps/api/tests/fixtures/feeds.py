@@ -293,3 +293,31 @@ FACT_CHECK_ALL_SUPPORTED = {
     ],
     "unverified_specifics": [],
 }
+
+
+# ----------------------------------------------------------------- media fixtures
+#: A 1x1 PNG — the smallest valid file that proves magic-byte detection works.
+TINY_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000a49444154789c6300010000050001" "0d0a2db4" "0000000049454e44ae426082"
+)
+
+ELEVENLABS_VOICES = {
+    "voices": [
+        {
+            "voice_id": "fixture-voice-1",
+            "name": "TEST FIXTURE Voice",
+            "category": "premade",
+            "labels": {"gender": "neutral"},
+            "verified_languages": ["en"],
+            "preview_url": "https://fixture.invalid/preview.mp3",
+        }
+    ]
+}
+
+ELEVENLABS_SUBSCRIPTION = {
+    "tier": "fixture",
+    "character_count": 12000,
+    "character_limit": 100000,
+    "next_character_count_reset_unix": 1793000000,
+}

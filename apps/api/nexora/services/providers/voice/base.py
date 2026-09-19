@@ -27,10 +27,17 @@ class GeneratedAudio:
     voice_id: str
     character_count: int
     file_extension: str = "mp3"
+    #: Per-character timings when the provider measured them. ``None`` means the
+    #: provider returned none, and subtitle timing must be estimated instead.
+    alignment: list[dict[str, Any]] | None = None
 
 
 class VoiceProvider(Provider, abc.ABC):
     kind = "voice"
+
+    #: Whether this provider returns real timings with the audio. When False, subtitle
+    #: timing is derived from the measured duration and must be labelled as estimated.
+    provides_timings: bool = False
 
     @abc.abstractmethod
     def list_voices(self) -> list[Voice]:
