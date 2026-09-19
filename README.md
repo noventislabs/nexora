@@ -139,6 +139,6 @@ fixture is labelled as a test fixture.
 
 ## Documentation
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — modules, data model, job queue
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — modules, data model, job queue, trend engine and the Opportunity Score formula
 - [`docs/SECURITY.md`](docs/SECURITY.md) — credential handling, authentication, threat notes
 - [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — running, migrating, backing up

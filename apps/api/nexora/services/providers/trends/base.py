@@ -24,14 +24,31 @@ class NormalizedTrend:
     category: str | None = None
     language: str | None = None
     author: str | None = None
+    #: Geographic scope the source itself reported or was configured for (ISO 3166-1
+    #: alpha-2, or "GLOBAL"). Never guessed from the content.
+    region: str | None = None
     published_at: datetime | None = None
     #: Sparse: only keys the source actually returned (views, likes, comments, score...).
     engagement: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
     def dedupe_hash(self, source_name: str) -> str:
+        """Identity of this item *within its own source* (re-fetch deduplication)."""
         basis = f"{source_name}|{self.external_id}".encode()
         return hashlib.sha256(basis).hexdigest()
+
+    def content_hash(self) -> str:
+        """Cross-source identity: the same story seen through two feeds hashes alike.
+
+        Built from the significant title tokens only, so differing headlines for the
+        same story collide while genuinely different stories do not.
+        """
+        from nexora.services.trends.scoring import tokenize
+
+        tokens = sorted(tokenize(self.title))
+        if not tokens:
+            return hashlib.sha256(self.title.strip().lower().encode()).hexdigest()
+        return hashlib.sha256(" ".join(tokens).encode()).hexdigest()
 
 
 @dataclass

@@ -96,13 +96,23 @@ class Provider(abc.ABC):
         return self.availability()
 
     def require(self) -> None:
-        """Raise :class:`ProviderNotConfigured` unless this provider can be used."""
+        """Raise :class:`ProviderNotConfigured` unless this provider can be used.
+
+        The message names the provider and the exact settings that are missing, so the
+        operator never has to guess what to configure.
+        """
         availability = self.availability()
-        if not availability.configured:
-            raise ProviderNotConfigured(
-                f"{self.kind} provider is NOT CONFIGURED. {availability.detail}".strip(),
-                details=availability.to_dict(),
-            )
+        if availability.configured:
+            return
+        missing = (
+            f" Missing: {', '.join(availability.missing_settings)}."
+            if availability.missing_settings
+            else ""
+        )
+        raise ProviderNotConfigured(
+            f"{self.name} ({self.kind}) is NOT CONFIGURED. {availability.detail}{missing}".strip(),
+            details=availability.to_dict(),
+        )
 
 
 P = TypeVar("P", bound=Provider)

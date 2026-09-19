@@ -160,3 +160,150 @@ export type AuditEntry = {
 };
 
 export type Paged<T> = { items: T[]; total: number; limit: number; offset: number };
+
+// --------------------------------------------------------------------- trends
+
+/** How current an item is, derived from real timestamps. */
+export type Freshness = {
+  state: "FRESH" | "STALE" | "UNKNOWN";
+  age_seconds: number | null;
+  basis: "published_at" | "discovered_at" | null;
+};
+
+export type ScoreComponent = {
+  key: string;
+  label: string;
+  weight: number;
+  value: number | null;
+  basis: string;
+  available: boolean;
+  rating: "High" | "Medium" | "Low" | "UNKNOWN";
+};
+
+export type ScoreBreakdown = {
+  score: number | null;
+  available: boolean;
+  unavailable_reason: string | null;
+  competition_level: "low" | "medium" | "high" | "unknown";
+  available_weight: number;
+  components: ScoreComponent[];
+  method: string;
+  context?: Record<string, unknown>;
+  derived_from?: Record<string, unknown>;
+};
+
+export type Trend = {
+  id: string;
+  title: string;
+  summary: string | null;
+  url: string | null;
+  source: { id: string; name: string; kind: string };
+  category: string | null;
+  language: string | null;
+  author: string | null;
+  region: string | null;
+  published_at: string | null;
+  discovered_at: string | null;
+  freshness: Freshness;
+  /** Only metrics the upstream actually returned. An absent key means "unknown". */
+  engagement: Record<string, number>;
+  corroboration_count: number;
+  duplicate_of_id: string | null;
+  opportunity_score: number | null;
+  score_breakdown: ScoreBreakdown | null;
+  scored_at: string | null;
+};
+
+export type TrendSource = {
+  id: string;
+  kind: "rss" | "youtube_data_api" | "reddit";
+  name: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  reliability: number;
+  region: string | null;
+  min_interval_minutes: number;
+  last_run_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  last_item_count: number | null;
+  consecutive_failures: number;
+  next_allowed_at: string | null;
+  due_now: boolean;
+  availability: Availability;
+};
+
+export type TrendSourcesResponse = {
+  items: TrendSource[];
+  total: number;
+  providers: Record<string, Availability>;
+  supported_kinds: string[];
+};
+
+export type SourceScanResult = {
+  source_id: string;
+  source_name: string;
+  kind: string;
+  status: "SUCCESS" | "FAILED" | "SKIPPED" | "NOT_CONFIGURED";
+  fetched: number;
+  stored: number;
+  duplicates: number;
+  error: string | null;
+  warnings: string[];
+};
+
+export type ScanResponse =
+  | { mode: "queued"; job_id: string; status: string }
+  | {
+      mode: "inline";
+      started_at: string;
+      finished_at: string;
+      duration_seconds: number;
+      fetched: number;
+      stored: number;
+      duplicates: number;
+      sources: SourceScanResult[];
+    };
+
+export type TopicCandidate = {
+  id: string;
+  title: string;
+  angle: string;
+  audience: string | null;
+  category: string | null;
+  why_now: string | null;
+  risks: string[];
+  sources: {
+    trending_topic_id: string;
+    title: string;
+    url: string | null;
+    source_name: string;
+    source_kind: string;
+    published_at: string | null;
+  }[];
+  opportunity_score: number | null;
+  score_breakdown: ScoreBreakdown | null;
+  competition_level: "low" | "medium" | "high" | "unknown";
+  evidence_count: number;
+  evidence_source_kinds: string[];
+  newest_evidence_at: string | null;
+  oldest_evidence_at: string | null;
+  status: "proposed" | "approved" | "rejected" | "saved" | "converted";
+  generated_by: { provider: string | null; model: string | null };
+  generation_run_id: string | null;
+  created_at: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+};
+
+export type ScoringModel = {
+  name: string;
+  range: [number, number];
+  not_a_prediction: string;
+  formula: string;
+  minimum_available_weight: number;
+  unavailable_rule: string;
+  weights: Record<string, number>;
+  velocity_reference_per_hour: Record<string, number>;
+  components: Record<string, string>;
+};

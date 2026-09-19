@@ -66,8 +66,8 @@ def today_counters(session: Session, channel: Channel) -> dict[str, Any]:
         .select_from(TrendingTopic)
         .where(
             TrendingTopic.channel_id == channel.id,
-            TrendingTopic.collected_at >= start,
-            TrendingTopic.collected_at < end,
+            TrendingTopic.discovered_at >= start,
+            TrendingTopic.discovered_at < end,
         )
     )
     ideas = count(

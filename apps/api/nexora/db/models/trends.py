@@ -27,10 +27,18 @@ class TrendSource(Base, TimestampMixin):
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     reliability: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
+    #: Geographic scope this source covers (ISO 3166-1 alpha-2 or GLOBAL).
+    region: Mapped[str | None] = mapped_column(String(16))
+
     last_run_at = utc_column()
     last_status: Mapped[str | None] = mapped_column(String(32))
     last_error: Mapped[str | None] = mapped_column(Text)
     last_item_count: Mapped[int | None] = mapped_column(Integer)
+
+    #: Bounded caching / quota protection: a source is not re-fetched before this.
+    min_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    next_allowed_at = utc_column()
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
         UniqueConstraint("channel_id", "kind", "name", name="uq_trend_sources_channel_kind_name"),
@@ -63,8 +71,20 @@ class TrendingTopic(Base):
     category: Mapped[str | None] = mapped_column(String(64), index=True)
     language: Mapped[str | None] = mapped_column(String(16))
     author: Mapped[str | None] = mapped_column(String(255))
+    #: Geographic scope, when the source actually states or is configured for one.
+    region: Mapped[str | None] = mapped_column(String(16), index=True)
     published_at = utc_column(index=True)
-    collected_at = utc_column(nullable=False)
+    #: When NEXORA first saw this item. Always known.
+    discovered_at = utc_column(nullable=False, index=True)
+
+    #: Cross-source identity. Two feeds carrying the same story share this hash.
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    #: Set when this row was recognised as a restatement of an earlier row.
+    duplicate_of_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("trending_topics.id", ondelete="SET NULL"), index=True
+    )
+    #: How many distinct sources corroborated this story, counted, never estimated.
+    corroboration_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     # Engagement is a sparse map — only keys the source actually returned.
     engagement: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
@@ -76,7 +96,10 @@ class TrendingTopic(Base):
 
     __table_args__ = (
         UniqueConstraint("source_id", "dedupe_hash", name="uq_trending_topics_source_dedupe"),
-        Index("ix_trending_topics_channel_collected", "channel_id", "collected_at"),
+        Index("ix_trending_topics_channel_discovered", "channel_id", "discovered_at"),
+        Index("ix_trending_topics_channel_content", "channel_id", "content_hash"),
+        Index("ix_trending_topics_channel_score", "channel_id", "opportunity_score"),
+        Index("ix_trending_topics_source_kind", "source_kind"),
     )
 
 
@@ -105,6 +128,12 @@ class TopicCandidate(Base, TimestampMixin):
     opportunity_score: Mapped[int | None] = mapped_column(Integer, index=True)
     score_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     competition_level: Mapped[str | None] = mapped_column(String(16))
+
+    #: Freshness is derived from the evidence, not from when the candidate was written.
+    evidence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    evidence_source_kinds: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    newest_evidence_at = utc_column()
+    oldest_evidence_at = utc_column()
 
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default=CandidateStatus.PROPOSED.value, index=True
