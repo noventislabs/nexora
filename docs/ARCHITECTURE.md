@@ -510,6 +510,61 @@ discovered during it. The source/attribution section is assembled **in code** fr
 stored research documents, never written by the model, so attribution cannot be
 hallucinated.
 
+## Analytics
+
+Channel-scoped throughout. There is no cross-channel comparison endpoint, because a
+median across channels with different audiences describes nothing that exists.
+
+### Collection
+
+Reading impressions, click-through rate, watch time, retention or revenue requires the
+channel owner's OAuth consent with the analytics scope. Collection **refuses** without
+it rather than falling back to public data: public reads cannot supply those metrics,
+and a snapshot silently missing them would read as a channel that has none.
+
+The Analytics API returns a column-header/row table. The adapter maps it back to named
+metrics and reports what it asked for and did not get as `unavailable_metrics` — a
+channel with 0 impressions and a channel whose impressions we may not read are
+different facts, and the UI renders them differently.
+
+Impressions and CTR are fetched as a **separate report**, because the API rejects an
+entire request if one metric is invalid for it; losing the core metrics to chase
+impressions would be a bad trade. Their failure costs those two metrics and marks them
+unavailable. Revenue needs a further scope on top of analytics; without it the metric
+is absent, never `0`, and it is never derived from views.
+
+### Baselines
+
+A baseline is one channel's own median for one metric. `Baseline` cannot be constructed
+without a sample size and an observation period, because a median reported without them
+invites exactly the over-reading this product refuses.
+
+- Below **5** comparable videos there is no baseline. The result is
+  `INSUFFICIENT_DATA` naming the count it has and the count it needs.
+- A video published within the last **7 days** is excluded — it has not had time to
+  behave like the others.
+- A video with no recorded metric is excluded rather than counted as zero, which would
+  drag every median down.
+- A video is excluded from **its own** baseline; comparing it against a median it
+  helped set would understate the difference.
+
+### Observations
+
+A comparison produces wording that is a measurement:
+
+> This video recorded 3,600 views, above this channel's median of 1,200 across 9 videos
+> published between 2026-06-22 and 2026-09-20.
+
+Never "this topic performs well", and never a forecast. Attributes the video shares
+with others — weekday, runtime, a question in the title — are stored as **possible
+contributing factors**, with the payload stating that NEXORA cannot isolate a cause.
+They are correlations within one channel's small sample, and the wording never says
+otherwise.
+
+`category_performance()` reports median views per topic category within one channel,
+with a per-category sample size and an `INSUFFICIENT_DATA` status for any category
+below the threshold.
+
 ## Frontend
 
 Next.js App Router. The dashboard is deliberately light for an 8 GB / i3 machine:

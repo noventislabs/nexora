@@ -48,6 +48,11 @@ This is enforced in code, not just in copy:
   reported as `INSUFFICIENT_DATA`, never as a low score.
 - A channel's audience is never inferred from its name or its categories, and it is
   never derived to or from YouTube's made-for-kids declaration.
+- Analytics are **measurements, not forecasts**. Every comparison states its
+  observation period, its sample size and the baseline it was measured against, and
+  below five comparable videos there is no baseline at all — just a stated reason.
+  Attributes a video shares with others are labelled possible contributing factors;
+  NEXORA does not claim to know what caused anything.
 
 ## Multi-channel
 
