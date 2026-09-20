@@ -6,6 +6,7 @@ from nexora.db.models.audience import (
     ChannelTopicRelevance,
     ContentCategory,
 )
+from nexora.db.models.automation import AutomationLock
 from nexora.db.models.content import (
     ContentProject,
     ContentScript,
@@ -43,6 +44,7 @@ from nexora.db.models.trends import (
 
 __all__ = [
     "AnalyticsSnapshot",
+    "AutomationLock",
     "ChannelProfile",
     "ChannelTopicRelevance",
     "ContentCategory",

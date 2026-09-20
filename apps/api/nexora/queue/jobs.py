@@ -199,6 +199,23 @@ def cancel_pending_for_channel(session: Session, channel_id: uuid.UUID, *, types
     return len(jobs)
 
 
+def cancel_pending_globally(session: Session, *, types: tuple[str, ...] = ()) -> int:
+    """Cancel queued work across every channel. Used by the global emergency stop.
+
+    A job already sitting in the queue would otherwise run after the stop was engaged,
+    which is exactly what the stop exists to prevent. Only QUEUED jobs are touched — a
+    job already executing is stopped by the orchestrator's own per-stage guard rather
+    than by yanking its row out from under it.
+    """
+    stmt = select(Job).where(Job.status == RunStatus.QUEUED.value)
+    if types:
+        stmt = stmt.where(Job.type.in_(types))
+    jobs = list(session.execute(stmt).scalars())
+    for job in jobs:
+        cancel(session, job, reason="global emergency stop")
+    return len(jobs)
+
+
 def log(session: Session, job: Job, message: str, *, level: str = "INFO", **context: Any) -> None:
     session.add(
         JobLog(

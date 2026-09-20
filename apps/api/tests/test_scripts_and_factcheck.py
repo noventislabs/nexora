@@ -338,16 +338,29 @@ def test_fact_check_adjudicates_in_code_not_by_the_model(
 
     verdicts = {claim["assertion"][:30]: claim["verdict"] for claim in result.claims}
     assert verdicts["Packaging is the binding const"] == "SUPPORTED"
-    # Overstated -> needs review, even though the model cited a real document.
-    assert verdicts["The addition was exactly 40,00"] == "NEEDS_REVIEW"
-    # No citation -> unsupported, regardless of how confident the model sounded.
-    assert verdicts["A competitor will exit the mar"] == "UNSUPPORTED"
+    # The research recorded disagreement about this figure and the script states it as
+    # settled. Sources actively disagreeing is a stronger finding than loose wording,
+    # so it is CONTRADICTED rather than merely overstated.
+    assert verdicts["The addition was exactly 40,00"] == "CONTRADICTED"
+    # No citation -> unverified, regardless of how confident the model sounded. The
+    # research exists; nothing in it supports this.
+    assert verdicts["A competitor will exit the mar"] == "UNVERIFIED"
 
     assert result.check.status == CheckStatus.FAIL.value
     assert result.check.supported_count == 1
-    assert result.check.needs_review_count == 1
-    assert result.check.unsupported_count == 1
+    # Both blocking verdicts are counted together for the roll-up.
+    assert result.check.unsupported_count == 2
     assert factcheck_service.check_to_dict(result.check)["blocks_publishing"] is True
+
+    counts = factcheck_service.verdict_counts(result.check)
+    assert counts == {
+        "SUPPORTED": 1,
+        "PARTIALLY_SUPPORTED": 0,
+        "CONTRADICTED": 1,
+        "UNVERIFIED": 1,
+        "INSUFFICIENT_SOURCES": 0,
+    }
+    assert len(factcheck_service.blocking_claims(result.check)) == 2
 
 
 @respx.mock
@@ -377,7 +390,10 @@ def test_citations_to_documents_without_text_do_not_count(
     respx.post(ANTHROPIC_URL).mock(return_value=anthropic_reply(feeds.FACT_CHECK_ALL_SUPPORTED))
     result = factcheck_service.run_fact_check(db, channel, project, version)
 
-    assert result.claims[0]["verdict"] == "UNSUPPORTED"
+    # With no document carrying text, nothing was checkable at all. That is
+    # INSUFFICIENT_SOURCES rather than UNVERIFIED: the two need different fixes —
+    # one is a gap in the research, the other a claim the research contradicts.
+    assert result.claims[0]["verdict"] == "INSUFFICIENT_SOURCES"
     assert result.check.status == CheckStatus.FAIL.value
 
 

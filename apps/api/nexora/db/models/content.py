@@ -39,6 +39,16 @@ class ContentProject(Base, TimestampMixin):
     )
     target_duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=480)
     language: Mapped[str] = mapped_column(String(16), nullable=False, default="en")
+    #: How the video presents itself. An ``explainer`` asserts facts and is held to the
+    #: fact-check gate without exception. A ``commentary`` is labelled opinion, and is
+    #: the only format the channel's commentary policy can exempt.
+    editorial_format: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="explainer"
+    )
+    #: Deterministic hash of the topic's significant vocabulary, used to recognise that
+    #: a new project would cover ground this channel has already covered. Computed, not
+    #: guessed — see ``nexora.services.automation.dedupe``.
+    topic_fingerprint: Mapped[str | None] = mapped_column(String(64), index=True)
 
     current_script_version_id: Mapped[uuid.UUID | None] = mapped_column()
     current_metadata_version_id: Mapped[uuid.UUID | None] = mapped_column()

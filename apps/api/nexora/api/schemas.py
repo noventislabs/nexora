@@ -73,6 +73,12 @@ class ChannelSettingsRequest(ApiModel):
 
 class AutomationSettingsRequest(ApiModel):
     mode: Literal["assisted", "semi_autonomous", "autonomous"] | None = None
+    #: Master switch for producing content unattended. OFF for a new channel.
+    automation_enabled: bool | None = None
+    #: Master switch for publishing at all, automated or manual.
+    publishing_enabled: bool | None = None
+    #: The single documented exception to the fact-check publish gate.
+    allow_unverified_commentary: bool | None = None
     autopilot_enabled: bool | None = None
     auto_publish_enabled: bool | None = None
     require_human_approval: bool | None = None

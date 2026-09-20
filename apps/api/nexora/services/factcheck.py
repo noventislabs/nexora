@@ -44,9 +44,33 @@ from nexora.services.providers.llm import LLMMessage, get_llm
 
 logger = get_logger(__name__)
 
+#: Per-claim verdicts. Five, because the differences between them change what an
+#: operator should do, and collapsing them would hide that:
+#:
+#: * SUPPORTED — a research document that exists says this.
+#: * PARTIALLY_SUPPORTED — the research says something weaker than the script does.
+#: * CONTRADICTED — the research recorded disagreement the script resolves anyway.
+#: * UNVERIFIED — the research exists but none of it supports this assertion.
+#: * INSUFFICIENT_SOURCES — there was not enough research to check anything against.
 SUPPORTED = "SUPPORTED"
-NEEDS_REVIEW = "NEEDS_REVIEW"
-UNSUPPORTED = "UNSUPPORTED"
+PARTIALLY_SUPPORTED = "PARTIALLY_SUPPORTED"
+CONTRADICTED = "CONTRADICTED"
+UNVERIFIED = "UNVERIFIED"
+INSUFFICIENT_SOURCES = "INSUFFICIENT_SOURCES"
+
+#: Verdicts that block autonomous publishing. An operator may still publish manually
+#: after reading the claim — a person can judge what automation cannot.
+BLOCKING_VERDICTS = (CONTRADICTED, UNVERIFIED, INSUFFICIENT_SOURCES)
+
+#: Retained so existing rows and callers keep working. NEEDS_REVIEW was the old name
+#: for what is now PARTIALLY_SUPPORTED.
+NEEDS_REVIEW = PARTIALLY_SUPPORTED
+UNSUPPORTED = UNVERIFIED
+
+#: A research package below this many usable documents cannot verify anything, so the
+#: honest per-claim verdict is INSUFFICIENT_SOURCES rather than UNVERIFIED — the
+#: difference being whether the claim failed or was never checkable.
+MIN_DOCUMENTS_TO_VERIFY = 2
 
 SYSTEM_PROMPT = """You are fact-checking a video narration against the research it was \
 written from.
@@ -138,8 +162,8 @@ def run_fact_check(
     ][:40]
 
     supported = sum(1 for claim in claims if claim["verdict"] == SUPPORTED)
-    needs_review = sum(1 for claim in claims if claim["verdict"] == NEEDS_REVIEW)
-    unsupported = sum(1 for claim in claims if claim["verdict"] == UNSUPPORTED)
+    needs_review = sum(1 for claim in claims if claim["verdict"] == PARTIALLY_SUPPORTED)
+    unsupported = sum(1 for claim in claims if claim["verdict"] in BLOCKING_VERDICTS)
     status = determine_status(
         supported=supported, needs_review=needs_review, unsupported=unsupported, claims=len(claims)
     )
@@ -190,7 +214,11 @@ def run_fact_check(
 def determine_status(
     *, supported: int, needs_review: int, unsupported: int, claims: int
 ) -> CheckStatus:
-    """Any unsupported assertion fails the check. Anything doubtful needs review."""
+    """Any contradicted, unverified or uncheckable assertion fails the check.
+
+    ``unsupported`` counts every blocking verdict. Anything merely overstated is a
+    review rather than a failure: the claim is true, the wording is not.
+    """
     if claims == 0:
         # Nothing checkable was extracted. That is not a pass — it is unverified.
         return CheckStatus.REVIEW
@@ -199,6 +227,31 @@ def determine_status(
     if needs_review > 0:
         return CheckStatus.REVIEW
     return CheckStatus.PASS
+
+
+def verdict_counts(check: Any) -> dict[str, int]:
+    """Per-verdict tallies from a stored check, for the publish gate and the UI."""
+    counts = {
+        SUPPORTED: 0,
+        PARTIALLY_SUPPORTED: 0,
+        CONTRADICTED: 0,
+        UNVERIFIED: 0,
+        INSUFFICIENT_SOURCES: 0,
+    }
+    for claim in check.claims or []:
+        verdict = claim.get("verdict")
+        if verdict in counts:
+            counts[verdict] += 1
+    return counts
+
+
+def blocking_claims(check: Any) -> list[dict[str, Any]]:
+    """The claims that stop autonomous publishing, with their reasons attached."""
+    return [
+        claim
+        for claim in (check.claims or [])
+        if claim.get("verdict") in BLOCKING_VERDICTS
+    ]
 
 
 def _require_research(session: Session, project: ContentProject) -> TopicResearch:
@@ -248,24 +301,35 @@ def _adjudicate(
         return None
 
     indices, unresolved = _resolve_indices(raw.get("document_indices"), documents)
+    usable = sum(1 for document in documents if (document.text or "").strip())
     reasons: list[str] = []
 
     if unresolved:
         reasons.append(
             f"{unresolved} cited document index/indices do not exist in this research."
         )
-    if not indices:
-        verdict = UNSUPPORTED
-        reasons.append("No research document supports this assertion.")
-    elif raw.get("overstated"):
-        verdict = NEEDS_REVIEW
-        reasons.append("States the point more strongly than the research does.")
-    elif _touches_conflict(assertion, conflict_terms):
-        verdict = NEEDS_REVIEW
+
+    if usable < MIN_DOCUMENTS_TO_VERIFY:
+        # Nothing was checkable. Calling that UNVERIFIED would blame the claim for a
+        # gap in the research, and the two need different fixes.
+        verdict = INSUFFICIENT_SOURCES
         reasons.append(
-            "Touches a subject the research recorded as contested; a script must not "
-            "resolve a disagreement the sources left open."
+            f"This research holds {usable} usable document"
+            f"{'' if usable == 1 else 's'}; at least {MIN_DOCUMENTS_TO_VERIFY} are "
+            "needed before any assertion can be checked."
         )
+    elif not indices:
+        verdict = UNVERIFIED
+        reasons.append("No research document supports this assertion.")
+    elif _touches_conflict(assertion, conflict_terms):
+        verdict = CONTRADICTED
+        reasons.append(
+            "The research recorded disagreement on this subject; a script must not "
+            "resolve a conflict the sources left open."
+        )
+    elif raw.get("overstated"):
+        verdict = PARTIALLY_SUPPORTED
+        reasons.append("States the point more strongly than the research does.")
     else:
         verdict = SUPPORTED
 

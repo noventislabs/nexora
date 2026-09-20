@@ -106,12 +106,38 @@ def test_autonomous_mode_requires_autopilot_on(auth_client: TestClient, channel:
     rejected = auth_client.patch(f"/api/channels/{channel.id}/automation", json={"mode": "autonomous"})
     assert rejected.status_code == 422
 
-    accepted = auth_client.patch(
+    # Autopilot alone is not enough either: the channel's master automation switch
+    # must be turned on in the same request, so no single field flips a channel to
+    # autonomous by itself.
+    still_rejected = auth_client.patch(
         f"/api/channels/{channel.id}/automation",
         json={"mode": "autonomous", "autopilot_enabled": True},
     )
+    assert still_rejected.status_code == 422
+    assert "automation is OFF" in still_rejected.json()["message"]
+
+    accepted = auth_client.patch(
+        f"/api/channels/{channel.id}/automation",
+        json={
+            "mode": "autonomous",
+            "autopilot_enabled": True,
+            "automation_enabled": True,
+        },
+    )
     assert accepted.status_code == 200
     assert accepted.json()["mode"] == "autonomous"
+
+
+def test_a_new_channel_has_automation_off(auth_client: TestClient, channel: Channel) -> None:
+    """Automation is off for a new channel, and publishing is not automated."""
+    body = auth_client.get(f"/api/channels/{channel.id}/automation").json()
+
+    assert body["automation_enabled"] is False
+    assert body["autopilot_enabled"] is False
+    assert body["auto_publish_enabled"] is False
+    assert body["require_human_approval"] is True
+    assert body["allow_unverified_commentary"] is False
+    assert body["max_videos_per_day"] == 1
 
 
 def test_emergency_stop_disables_autopilot_and_blocks_re_enable(

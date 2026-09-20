@@ -136,6 +136,13 @@ class AutomationSettings(Base, TimestampMixin):
     )
 
     mode: Mapped[str] = mapped_column(String(32), nullable=False, default=AutomationMode.ASSISTED.value)
+    #: Master switch for *producing* content on this channel without being asked.
+    #: Separate from publishing: a channel may be allowed to research, write and render
+    #: while still requiring a person for every upload.
+    automation_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Master switch for *publishing* from this channel at all, automated or manual.
+    #: Turning it off stops uploads without unwinding automation's other work.
+    publishing_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     autopilot_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     auto_publish_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     require_human_approval: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -154,6 +161,13 @@ class AutomationSettings(Base, TimestampMixin):
     max_copyright_risk: Mapped[str] = mapped_column(String(16), nullable=False, default="low")
     block_on_unknown_license: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     require_fact_check_pass: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    #: The single documented exception to the fact-check publish gate. Off by default.
+    #: When on, a project explicitly marked as commentary may publish autonomously with
+    #: unverified claims — because a labelled opinion piece is not asserting them as
+    #: fact. It never applies to a project in the default explainer format.
+    allow_unverified_commentary: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     emergency_stop: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     emergency_stop_at = utc_column()

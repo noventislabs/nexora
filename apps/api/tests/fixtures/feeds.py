@@ -251,6 +251,22 @@ according to the industry association.</p>
 ROBOTS_ALLOW_ALL = "User-agent: *\nAllow: /\n"
 ROBOTS_DISALLOW_ALL = "User-agent: *\nDisallow: /\n"
 
+#: A topic-generation reply citing the collected evidence by index, as the real
+#: contract requires. Obviously synthetic, per the module docstring.
+TOPIC_RESPONSE = {
+    "candidates": [
+        {
+            "title": "TEST FIXTURE: what the training-cost figures actually show",
+            "angle": "Explains what the measured training costs do and do not establish.",
+            "audience": "Technically literate viewers",
+            "category": "ai",
+            "why_now": "The figures were published this week.",
+            "evidence_indices": [0, 1],
+            "risks": ["Figures are self-reported by the vendors."],
+        }
+    ]
+}
+
 RESEARCH_RESPONSE = {
     "summary": "Two industry associations report different wafer-start additions; both agree "
     "packaging is the binding constraint.",

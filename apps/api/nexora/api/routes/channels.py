@@ -45,6 +45,9 @@ def _settings_dict(record: Any) -> dict[str, Any]:
 def _automation_dict(record: Any) -> dict[str, Any]:
     return {
         "mode": record.mode,
+        "automation_enabled": record.automation_enabled,
+        "publishing_enabled": record.publishing_enabled,
+        "allow_unverified_commentary": record.allow_unverified_commentary,
         "autopilot_enabled": record.autopilot_enabled,
         "auto_publish_enabled": record.auto_publish_enabled,
         "require_human_approval": record.require_human_approval,
@@ -265,6 +268,15 @@ def _validate_automation(resulting: dict[str, Any]) -> None:
     """Reject automation configurations that contradict the product's safety rules."""
     if resulting["publish_window_start_hour"] == resulting["publish_window_end_hour"]:
         raise ValidationError("Publishing window start and end hours must differ.")
+    if resulting["emergency_stop"] and (
+        resulting["autopilot_enabled"]
+        or resulting["auto_publish_enabled"]
+        or resulting["automation_enabled"]
+    ):
+        raise ValidationError(
+            "Emergency stop is engaged. Clear it before re-enabling automation, "
+            "autopilot or auto-publishing."
+        )
     if resulting["auto_publish_enabled"] and resulting["require_human_approval"]:
         raise ValidationError(
             "Auto-publishing cannot be enabled while human approval is required. "
@@ -275,11 +287,14 @@ def _validate_automation(resulting: dict[str, Any]) -> None:
             "Autonomous mode requires the autopilot switch to be ON. "
             "Enable autopilot in the same request to confirm."
         )
-    if resulting["emergency_stop"] and (
-        resulting["autopilot_enabled"] or resulting["auto_publish_enabled"]
-    ):
+    if resulting["autopilot_enabled"] and not resulting["automation_enabled"]:
         raise ValidationError(
-            "Emergency stop is engaged. Clear it before re-enabling autopilot or auto-publishing."
+            "Autopilot cannot be ON while automation is OFF for this channel. "
+            "Enable automation in the same request to confirm."
+        )
+    if resulting["auto_publish_enabled"] and not resulting["publishing_enabled"]:
+        raise ValidationError(
+            "Auto-publishing cannot be ON while publishing is OFF for this channel."
         )
 
 
