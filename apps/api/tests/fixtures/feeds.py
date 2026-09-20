@@ -321,3 +321,104 @@ ELEVENLABS_SUBSCRIPTION = {
     "character_limit": 100000,
     "next_character_count_reset_unix": 1793000000,
 }
+
+
+# ---------------------------------------------------------------- youtube fixtures
+GOOGLE_TOKEN_RESPONSE = {
+    "access_token": "fixture-access-token",
+    "refresh_token": "fixture-refresh-token",
+    "expires_in": 3600,
+    "token_type": "Bearer",
+    "scope": (
+        "https://www.googleapis.com/auth/youtube.upload "
+        "https://www.googleapis.com/auth/youtube.readonly "
+        "https://www.googleapis.com/auth/youtube.force-ssl "
+        "https://www.googleapis.com/auth/yt-analytics.readonly"
+    ),
+}
+
+GOOGLE_REFRESH_RESPONSE = {
+    "access_token": "fixture-refreshed-token",
+    "expires_in": 3600,
+    "token_type": "Bearer",
+    "scope": "https://www.googleapis.com/auth/youtube.upload",
+}
+
+YOUTUBE_MY_CHANNEL = {
+    "items": [
+        {
+            "id": "UCFIXTURECHANNELID000000",
+            "snippet": {"title": "TEST FIXTURE Channel", "customUrl": "@fixturechannel"},
+            "statistics": {
+                "subscriberCount": "1234",
+                "hiddenSubscriberCount": False,
+                "videoCount": "7",
+                "viewCount": "98765",
+            },
+            "contentDetails": {"relatedPlaylists": {"uploads": "UUFIXTURECHANNELID00000"}},
+        }
+    ]
+}
+
+YOUTUBE_MY_CHANNEL_HIDDEN_SUBS = {
+    "items": [
+        {
+            "id": "UCFIXTURECHANNELID000000",
+            "snippet": {"title": "TEST FIXTURE Channel"},
+            "statistics": {
+                "hiddenSubscriberCount": True,
+                "videoCount": "7",
+                "viewCount": "98765",
+            },
+            "contentDetails": {"relatedPlaylists": {"uploads": "UUFIXTURECHANNELID00000"}},
+        }
+    ]
+}
+
+YOUTUBE_UPLOADED_VIDEO = {
+    "id": "FIXTUREUPLOAD1",
+    "snippet": {
+        "title": "TEST FIXTURE uploaded video",
+        "description": "Synthetic description.",
+        "tags": ["fixture", "testing"],
+        "publishedAt": "2026-09-19T12:00:00Z",
+        "thumbnails": {"high": {"url": "https://fixture.invalid/thumb.jpg"}},
+    },
+    "status": {
+        "uploadStatus": "uploaded",
+        "privacyStatus": "private",
+        "selfDeclaredMadeForKids": False,
+    },
+    "contentDetails": {"duration": "PT8M12S"},
+    "statistics": {"viewCount": "0"},
+}
+
+YOUTUBE_PUBLIC_CHANNEL = {
+    "items": [
+        {
+            "id": "UCFIXTUREPUBLICCHANNEL00",
+            "snippet": {
+                "title": "TEST FIXTURE Public Channel",
+                "customUrl": "@fixturepublic",
+                "description": "Synthetic public channel.",
+                "publishedAt": "2026-01-15T09:00:00Z",
+                "country": "GB",
+                "thumbnails": {"high": {"url": "https://fixture.invalid/avatar.jpg"}},
+            },
+            "statistics": {
+                "subscriberCount": "4321",
+                "hiddenSubscriberCount": False,
+                "videoCount": "42",
+                "viewCount": "123456",
+            },
+            "contentDetails": {"relatedPlaylists": {"uploads": "UUFIXTUREPUBLICCHANNEL0"}},
+        }
+    ]
+}
+
+METADATA_RESPONSE = {
+    "title": "Why two industry bodies counted the same quarter differently",
+    "description": "Two associations published different figures for the same quarter.\n\n"
+    "This video walks through what each measured and where they diverge.",
+    "tags": ["semiconductor", "manufacturing", "industry analysis"],
+}

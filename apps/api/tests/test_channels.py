@@ -164,3 +164,45 @@ def test_settings_duration_bounds_validated(auth_client: TestClient, channel: Ch
         json={"target_duration_min_seconds": 900, "target_duration_max_seconds": 300},
     )
     assert response.status_code == 422
+
+
+# ------------------------------------------------- YouTube upload defaults (Phase 5)
+def test_made_for_kids_starts_undeclared_rather_than_defaulting_to_no(
+    auth_client: TestClient, channel: Channel
+) -> None:
+    """NULL means undecided. Defaulting either way would be guessing at a legal
+    declaration, and a wrong 'no' on children's content is the expensive direction."""
+    body = auth_client.get(f"/api/channels/{channel.id}/settings").json()
+
+    assert body["made_for_kids_default"] is None
+    assert body["youtube_category_id"] is None
+
+
+def test_made_for_kids_can_be_declared_either_way(
+    auth_client: TestClient, db: Session, channel: Channel
+) -> None:
+    declared_no = auth_client.patch(
+        f"/api/channels/{channel.id}/settings", json={"made_for_kids_default": False}
+    )
+    assert declared_no.status_code == 200
+    assert declared_no.json()["made_for_kids_default"] is False
+
+    declared_yes = auth_client.patch(
+        f"/api/channels/{channel.id}/settings", json={"made_for_kids_default": True}
+    )
+    assert declared_yes.json()["made_for_kids_default"] is True
+
+    from nexora.services.channels import get_channel_settings
+
+    db.expire_all()
+    assert get_channel_settings(db, channel.id).made_for_kids_default is True
+
+
+def test_the_youtube_category_is_stored_as_the_api_id(
+    auth_client: TestClient, channel: Channel
+) -> None:
+    body = auth_client.patch(
+        f"/api/channels/{channel.id}/settings", json={"youtube_category_id": "28"}
+    ).json()
+
+    assert body["youtube_category_id"] == "28"
