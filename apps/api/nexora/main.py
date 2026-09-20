@@ -15,6 +15,7 @@ from nexora.api.middleware import (
     RequestContextMiddleware,
     SecurityHeadersMiddleware,
 )
+from nexora.api.routes import analytics as analytics_routes
 from nexora.api.routes import audience as audience_routes
 from nexora.api.routes import auth as auth_routes
 from nexora.api.routes import channels as channel_routes
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
     app.include_router(channel_routes.router)
     app.include_router(audience_routes.router)
     app.include_router(audience_routes.catalog_router)
+    app.include_router(analytics_routes.router)
     app.include_router(dashboard_routes.router)
     app.include_router(system_routes.router)
     app.include_router(system_routes.jobs_router)

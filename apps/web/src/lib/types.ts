@@ -851,3 +851,80 @@ export type RelevanceExplanation = {
   matching_inputs: ChannelProfile["matching_inputs"];
   relevance: ChannelRelevance;
 };
+
+// ------------------------------------------------------- Phase 6E: analytics
+
+export type ObservationPeriod = { start: string; end: string; days: number };
+
+export type BaselineResult =
+  | {
+      status: "AVAILABLE";
+      metric: string;
+      median: number;
+      sample_size: number;
+      observation_period: ObservationPeriod;
+      range: { min: number; max: number };
+      basis: string;
+    }
+  | {
+      status: "INSUFFICIENT_DATA";
+      median: null;
+      sample_size: number;
+      reason: string;
+    };
+
+export type AnalyticsSnapshot = {
+  id: string;
+  scope: "channel" | "video";
+  source: string;
+  captured_at: string | null;
+  period: { start: string | null; end: string | null };
+  /** Sparse. An absent key means the metric was not reported — not that it is 0. */
+  metrics: Record<string, number>;
+  unavailable_metrics: string[];
+  is_complete: boolean;
+  note: string;
+};
+
+export type AnalyticsOverview = {
+  channel_id: string;
+  channel_name: string;
+  oauth_app: Availability;
+  capabilities: Partial<YouTubeCapabilities>;
+  snapshot: AnalyticsSnapshot | null;
+  baselines: Record<string, BaselineResult>;
+  scope_note: string;
+  no_forecast_note: string;
+};
+
+export type VideoComparison = {
+  metric: string;
+  value: number;
+  observation: string;
+  compared_against: Extract<BaselineResult, { status: "AVAILABLE" }>;
+  possible_factors: { attribute: string; value: unknown; note: string }[];
+  not_a_cause: string;
+};
+
+export type CategoryPerformance = {
+  channel_id: string;
+  channel_name: string;
+  observation_period: ObservationPeriod;
+  categories: {
+    category: string;
+    status: "AVAILABLE" | "INSUFFICIENT_DATA";
+    median_views: number | null;
+    sample_size: number;
+    reason?: string;
+  }[];
+  note: string;
+};
+
+export type VideoWithMetrics = {
+  video_id: string;
+  youtube_video_id: string;
+  title: string;
+  published_at: string | null;
+  metrics: Record<string, number | null>;
+  has_metrics: boolean;
+};
