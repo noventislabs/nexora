@@ -45,11 +45,12 @@ requires editing a call site.
 
 ## Data model
 
-33 tables. Grouped by area:
+34 tables. Grouped by area:
 
 - **Identity** — `users`, `auth_sessions`, `channels`, `channel_settings`,
   `automation_settings`, `youtube_connections`, `oauth_states`
-- **Trends** — `trend_sources`, `trending_topics`, `topic_candidates`, `topic_research`
+- **Trends** — `trend_sources`, `trending_topics`, `topic_candidates`, `topic_research`,
+  `research_documents`
 - **Content** — `content_projects`, `content_scripts`, `script_versions`, `fact_checks`,
   `metadata_versions`, `quality_checks`, `copyright_checks`
 - **Media** — `video_assets`, `voice_jobs`, `video_projects`, `video_render_jobs`, `thumbnails`
@@ -290,6 +291,106 @@ operator-supplied background. Every candidate is kept and one must be approved b
 it becomes the project's thumbnail. The output carries an explicit note that NEXORA
 makes no claim about how it will perform — no CTR is predicted, estimated or implied.
 
+## YouTube integration and publishing
+
+### Two capabilities, kept apart
+
+NEXORA treats "which channel is this" and "may I upload to it" as separate things,
+because they are:
+
+| | Needs | Grants | Cannot see |
+|---|---|---|---|
+| **Public read** | `YOUTUBE_API_KEY` | Title, subscriber count (when not hidden), view count, video count | Impressions, CTR, watch time, retention, revenue |
+| **OAuth connection** | Channel owner's consent | Upload, channel analytics, (optionally) revenue | — |
+
+`link_public_channel()` sets `public_channel_id` and deliberately never touches
+`status`. A verified channel id is therefore visible in the UI as `public_read:
+GRANTED, upload: NOT GRANTED`. Nothing in the codebase upgrades one to the other.
+
+Metrics that only OAuth can supply are listed explicitly in
+`METRICS_REQUIRING_OAUTH`, so a screen can say *why* a number is missing instead of
+showing a blank or a zero. Public snapshots are stored with `is_complete=False`.
+
+### OAuth 2.0
+
+Authorization code flow with PKCE (S256), `access_type=offline` and
+`prompt=consent`. NEXORA never sees a YouTube password — the credential is typed on
+Google's own page.
+
+- `state` is single-use, stored as an HMAC fingerprint, and expires after 10 minutes.
+- The PKCE verifier is stored Fernet-sealed, since it is a credential for the exchange.
+- `exchange_code` **raises** if Google returns no refresh token. Without one the
+  connection would silently break an hour later, which is worse than failing now.
+- Tokens are refreshed 5 minutes ahead of expiry. A failed refresh sets
+  `status=revoked` rather than retrying forever, and the UI says so.
+- `connection_to_dict()` returns capabilities and never token material.
+- `/api/youtube/oauth/callback` is unauthenticated by design — Google calls it, not the
+  browser session — and the single-use `state` is what binds the response to the
+  request that started it.
+
+### Upload
+
+Resumable upload protocol, 8 MiB chunks. On a 308 the server's reported `Range` offset
+wins over the local counter and the stream seeks to match, because Google's view of how
+much it received is the authoritative one.
+
+- One `PublishJob` per `(project, script version, render asset)`, keyed by a SHA-256
+  `idempotency_key`. Re-publishing the same artefacts returns the existing job.
+- `execute_publish()` returns early when `youtube_video_id` is already set, so a retried
+  worker cannot create a duplicate video.
+- Thumbnail upload is best-effort: its failure never loses an uploaded video.
+- The video is **read back from YouTube** before the job is marked SUCCESS. Until that
+  read confirms it, the UI says no video id has been confirmed.
+- 3 attempts with 60s / 300s / 900s backoff. A permanent error (quota, permission,
+  rejected content) is not retried.
+- `publish_at` requires `privacy_status='private'`, which is YouTube's own rule.
+
+### Preflight gates
+
+`run_preflight()` evaluates every gate and returns all of them with their state, not
+just the first failure:
+
+`emergency_stop`, `autopilot_enabled`, `auto_publish_enabled`, `human_approval`,
+`daily_limit`, `weekly_limit`, `minimum_interval`, `publishing_window`, `render`,
+`metadata`, `quality_check`, `copyright_check`, `youtube_connection`, `privacy_status`.
+
+The autopilot-only gates (`autopilot_enabled`, `auto_publish_enabled`,
+`human_approval`) are omitted when a person publishes, because an operator pressing
+Publish *is* the human approval.
+
+An operator may override a blocked preflight with `force`. Autopilot may not:
+
+```python
+if force and authorized_by is PublishAuthorization.AUTOPILOT:
+    raise SafetyBlocked("Autopilot may not override a blocked preflight.")
+```
+
+### Quality and copyright checks
+
+Deterministic rules evaluated against the produced files. A model is never asked to
+score the work, because a score a model invents is exactly the fabrication this
+product refuses.
+
+Two gates deserve naming:
+
+- **Made-for-kids declaration.** `made_for_kids_default` is nullable on purpose:
+  `NULL` means *undecided*, which is distinct from "no". YouTube requires the
+  declaration on every upload and it carries legal weight, so an undecided channel
+  blocks publishing. NEXORA does not guess it.
+- **Originality.** A result below threshold *when there was something to compare
+  against* is a real failure and blocks. A result with nothing to compare against is
+  reported as `UNVERIFIED — This is not a pass`: a warning, not a block, because
+  otherwise a hand-written project could never publish. The wording never claims it
+  passed.
+
+### Metadata
+
+Title ≤ 100 characters, description ≤ 5000, tags ≤ 500 characters total and ≤ 30 each,
+`<` and `>` rejected — YouTube's own limits, enforced before upload rather than
+discovered during it. The source/attribution section is assembled **in code** from the
+stored research documents, never written by the model, so attribution cannot be
+hallucinated.
+
 ## Frontend
 
 Next.js App Router. The dashboard is deliberately light for an 8 GB / i3 machine:
@@ -302,3 +403,9 @@ Next.js App Router. The dashboard is deliberately light for an 8 GB / i3 machine
 
 The `Metric` component is the only place that decides how an unknown value renders,
 which is what makes a fabricated `0` impossible to introduce by accident.
+
+Publishing screens follow the same rule. `GateRow` renders a failed gate as `BLOCKED`
+or `WARNING` and never as `PASS`; `YouTubeConnectionCard` lists upload, analytics,
+revenue and public-read as four separate `GRANTED / NOT GRANTED` rows, so a verified
+channel id can never read as upload consent; and the OAuth return banner reports
+`?youtube_error=` as a failure rather than rendering the optimistic case.

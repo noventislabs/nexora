@@ -32,6 +32,23 @@ HMAC-SHA256) using `ENCRYPTION_KEY` before they reach the database. Connecting a
 channel is blocked entirely when no key is configured, rather than storing plaintext.
 NEXORA never requests, transports or stores a YouTube password.
 
+The authorization code flow uses **PKCE** (S256). The `state` parameter is single-use,
+stored only as an HMAC fingerprint, and expires after 10 minutes; the PKCE verifier is
+itself a credential for the exchange, so it is stored Fernet-sealed and deleted once
+used. `/api/youtube/oauth/callback` is deliberately unauthenticated — Google's redirect
+carries no session cookie — and the single-use `state` is what binds the response to
+the request that started it. An unknown, expired or replayed `state` fails closed: the
+browser is redirected back with `?youtube_error=` and nothing is connected.
+
+`connection_to_dict()` is the only serializer for a connection, and it returns
+capabilities, scopes and timestamps — never token material, encrypted or otherwise. A
+test asserts that no endpoint leaks a token, and that the ciphertext itself never
+appears in a response body.
+
+Disconnecting clears both encrypted tokens. A refresh Google rejects sets
+`status=revoked` rather than retrying indefinitely, and the UI says the authorization
+was revoked instead of showing the channel as connected.
+
 ## Input handling
 
 - Request bodies use Pydantic models with `extra="forbid"`, so unexpected fields are

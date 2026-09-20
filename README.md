@@ -36,6 +36,12 @@ This is enforced in code, not just in copy:
   ever produced.
 - Health statuses come from real probes: PostgreSQL and Redis are round-tripped and
   FFmpeg is executed.
+- A publish job is marked successful only after the video is **read back from
+  YouTube**. Until that read confirms it, the UI says no video id has been confirmed —
+  it never assumes an upload worked.
+- Identifying a YouTube channel by its id is never presented as permission to upload
+  to it. Upload, channel analytics, revenue and public read are four separate
+  capabilities, shown separately as `GRANTED` / `NOT GRANTED`.
 
 ## Architecture
 
@@ -104,7 +110,8 @@ the full list; the essentials are:
 | `LLM_PROVIDER` + key | Topics, research, scripts, fact check | Those features report `NOT CONFIGURED` |
 | `VOICE_PROVIDER` + key | Narration | `VOICE PROVIDER NOT CONFIGURED` |
 | `FFMPEG_BINARY` | Video rendering | `FFMPEG UNAVAILABLE` — no placeholder video is written |
-| `YOUTUBE_CLIENT_ID/SECRET` | Channel OAuth | Cannot connect a channel |
+| `YOUTUBE_CLIENT_ID/SECRET` | Channel OAuth (upload, analytics) | Cannot connect a channel — uploading reports `NOT CONFIGURED` |
+| `YOUTUBE_API_KEY` | Public channel and trend reads | Public statistics report `NOT CONFIGURED`; nothing is estimated |
 
 Never commit `.env`; it is git-ignored, and `.env.example` contains placeholders only.
 
@@ -119,12 +126,37 @@ Never commit `.env`; it is git-ignored, and `.env.example` contains placeholders
 | Max videos / day | 1 |
 | Block on unknown licence | ON |
 | Require fact check to pass | ON |
+| Upload privacy | **private** |
+| Made-for-kids declaration | **NOT DECLARED** — blocks publishing until set |
 
 Two contradictions are impossible by construction: auto-publishing cannot be enabled
 while human approval is required, and autonomous mode cannot be selected without
 turning the autopilot switch on in the same request. An **emergency stop** immediately
 disables autopilot, disables auto-publishing and cancels queued publish jobs; clearing
 it does *not* silently re-enable automation.
+
+Publishing adds its own gates. `GET /api/publish/preflight/{project_id}` returns every
+gate and its current state — emergency stop, rate limits, publishing window, render,
+metadata, quality, copyright, YouTube connection and privacy — and `POST /api/publish`
+returns **409 `safety_blocked`** naming each blocker rather than uploading. An operator
+may override a blocked preflight; autopilot may not override it for itself.
+
+`made_for_kids_default` is nullable on purpose: `NULL` means *undecided*, which is not
+the same as "no". YouTube requires the declaration on every upload and it carries legal
+weight, so an undecided channel cannot publish. Set it under
+**Settings → YouTube upload defaults**.
+
+### Connecting a YouTube channel
+
+1. In Google Cloud Console, enable **YouTube Data API v3** and create an **OAuth 2.0
+   Client ID** of type **Web application**.
+2. Add `http://localhost:8000/api/youtube/oauth/callback` as an authorized redirect URI
+   (use your real API origin in production).
+3. Put the client id and secret in `.env` as `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET`.
+4. In the dashboard: **Channels → Manage YouTube → Connect YouTube**.
+
+You sign in on Google's own page. NEXORA never sees, asks for, or stores a YouTube
+password; it stores OAuth tokens encrypted with `ENCRYPTION_KEY` and nothing else.
 
 ## Testing
 
