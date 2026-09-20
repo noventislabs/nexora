@@ -36,6 +36,85 @@ RSS_2_0 = """<?xml version="1.0" encoding="UTF-8"?>
 </rss>
 """
 
+#: A feed whose items sit squarely in the AI/technology vocabulary, so per-channel
+#: relevance can be exercised: a technology channel matches these, a kids channel does
+#: not. Deliberately large enough that the batch-comparison components (competition,
+#: content availability) are computable, so a scan of it produces a real score rather
+#: than an honest 'not enough signal'.
+RSS_TECH = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>TEST FIXTURE Technology Feed</title>
+    <link>https://fixture.invalid/tech</link>
+    <description>Synthetic feed used only by the NEXORA test suite.</description>
+    <item>
+      <title>TEST FIXTURE: machine learning model training costs analysed</title>
+      <link>https://fixture.invalid/tech/1</link>
+      <description>Synthetic item about an artificial intelligence training run.</description>
+      <pubDate>Mon, 14 Sep 2026 08:30:00 GMT</pubDate>
+      <guid isPermaLink="false">fixture-tech-1</guid>
+      <category>ai</category>
+    </item>
+    <item>
+      <title>TEST FIXTURE: semiconductor chip fabrication capacity expands</title>
+      <link>https://fixture.invalid/tech/2</link>
+      <description>Synthetic item about hardware and software supply.</description>
+      <pubDate>Tue, 15 Sep 2026 09:00:00 GMT</pubDate>
+      <guid isPermaLink="false">fixture-tech-2</guid>
+      <category>technology</category>
+    </item>
+    <item>
+      <title>TEST FIXTURE: neural inference moves to cloud platforms</title>
+      <link>https://fixture.invalid/tech/3</link>
+      <description>Synthetic item about an ai agent running on gpu hardware.</description>
+      <pubDate>Wed, 16 Sep 2026 10:00:00 GMT</pubDate>
+      <guid isPermaLink="false">fixture-tech-3</guid>
+      <category>ai</category>
+    </item>
+    <item>
+      <title>TEST FIXTURE: robotics automation reaches new factories</title>
+      <link>https://fixture.invalid/tech/4</link>
+      <description>Synthetic item about robotics and automation on a production line.</description>
+      <pubDate>Thu, 17 Sep 2026 08:00:00 GMT</pubDate>
+      <guid isPermaLink="false">fixture-tech-4</guid>
+      <category>technology</category>
+    </item>
+    <item>
+      <title>TEST FIXTURE: open source developer tooling consolidates</title>
+      <link>https://fixture.invalid/tech/5</link>
+      <description>Synthetic item about software developers and an open source platform.</description>
+      <pubDate>Thu, 17 Sep 2026 12:00:00 GMT</pubDate>
+      <guid isPermaLink="false">fixture-tech-5</guid>
+      <category>technology</category>
+    </item>
+    <item>
+      <title>TEST FIXTURE: data centre power draw becomes a constraint</title>
+      <link>https://fixture.invalid/tech/6</link>
+      <description>Synthetic item about cloud data infrastructure and hardware limits.</description>
+      <pubDate>Fri, 18 Sep 2026 08:00:00 GMT</pubDate>
+      <guid isPermaLink="false">fixture-tech-6</guid>
+      <category>technology</category>
+    </item>
+    <item>
+      <title>TEST FIXTURE: large language model evaluation methods compared</title>
+      <link>https://fixture.invalid/tech/7</link>
+      <description>Synthetic item about an llm and neural model benchmark.</description>
+      <pubDate>Fri, 18 Sep 2026 14:00:00 GMT</pubDate>
+      <guid isPermaLink="false">fixture-tech-7</guid>
+      <category>ai</category>
+    </item>
+    <item>
+      <title>TEST FIXTURE: cyber security disclosure rules take effect</title>
+      <link>https://fixture.invalid/tech/8</link>
+      <description>Synthetic item about cyber security and software patching.</description>
+      <pubDate>Sat, 19 Sep 2026 09:00:00 GMT</pubDate>
+      <guid isPermaLink="false">fixture-tech-8</guid>
+      <category>technology</category>
+    </item>
+  </channel>
+</rss>
+"""
+
 ATOM_1_0 = """<?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <title>TEST FIXTURE Atom Feed</title>

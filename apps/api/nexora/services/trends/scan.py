@@ -105,11 +105,18 @@ def scan_channel(
     actor_type: ActorType = ActorType.SYSTEM,
     user_id: uuid.UUID | None = None,
 ) -> ScanResult:
-    """Scan this channel's enabled trend sources."""
+    """Scan the enabled trend sources this channel can see.
+
+    That is the channel's own sources plus the account's shared ones. A shared source
+    is fetched once per due-interval regardless of which channel triggers the scan, so
+    adding channels does not multiply the load on an upstream feed.
+    """
     started = datetime.now(UTC)
     sources = [
         source
-        for source in source_service.list_sources(session, channel.id)
+        for source in source_service.list_sources(
+            session, channel.id, user_id=channel.user_id
+        )
         if source.enabled and (source_ids is None or source.id in source_ids)
     ]
 
@@ -366,7 +373,8 @@ def _score(session: Session, channel: Channel, rows: list[TrendingTopic]) -> Non
         source_names=[row.source_name for row in rows],
     )
     reliabilities = {
-        source.id: source.reliability for source in source_service.list_sources(session, channel.id)
+        source.id: source.reliability
+        for source in source_service.list_sources(session, channel.id, user_id=channel.user_id)
     }
     now = datetime.now(UTC)
 

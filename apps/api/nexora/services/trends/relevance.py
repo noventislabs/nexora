@@ -19,9 +19,11 @@ Three rules keep it honest:
 from __future__ import annotations
 
 import math
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import select
@@ -84,15 +86,21 @@ def _haystack(title: str, summary: str | None) -> str:
     return f"{title} {summary or ''}".lower()
 
 
-def _phrase_hit(phrase: str, haystack: str, tokens: set[str]) -> bool:
+@lru_cache(maxsize=4096)
+def _pattern(phrase: str) -> re.Pattern[str]:
+    # Word-boundary matching on the raw text rather than on a token set. A token set
+    # drops short words, which would silently make "ai" — a category keyword and a
+    # plausible blocked topic — impossible to match.
+    return re.compile(rf"(?<!\w){re.escape(phrase)}(?!\w)")
+
+
+def _phrase_hit(phrase: str, haystack: str) -> bool:
     """Match a phrase the way an operator would expect.
 
-    A multi-word phrase must appear as a substring. A single word must appear as a
-    whole token, so blocking "war" does not also block "warranty" or "software".
+    Bounded on both sides, so blocking "war" does not also block "warranty" or
+    "software", and a two-letter term like "ai" still matches the word "ai".
     """
-    if " " in phrase:
-        return phrase in haystack
-    return phrase in tokens
+    return _pattern(phrase).search(haystack) is not None
 
 
 def evaluate(
@@ -129,7 +137,7 @@ def evaluate(
         ("sensitive_content_restrictions", sensitive_restrictions),
     ):
         for phrase in phrases:
-            if _phrase_hit(phrase, haystack, tokens):
+            if _phrase_hit(phrase, haystack):
                 result.excluded_by_rules.append(
                     {
                         "rule": rule_name,
@@ -198,7 +206,7 @@ def evaluate(
     ):
         for key in keys:
             keywords = category_keywords.get(key, [])
-            hits = [word for word in keywords if _phrase_hit(word, haystack, tokens)]
+            hits = [word for word in keywords if _phrase_hit(word, haystack)]
             if not hits:
                 continue
             result.matched_categories.append(
@@ -218,7 +226,7 @@ def evaluate(
 
     # --- Explicit preferences ----------------------------------------------------
     for phrase in preferred_topics:
-        if _phrase_hit(phrase, haystack, tokens):
+        if _phrase_hit(phrase, haystack):
             result.matched_preferences.append({"preference": phrase, "matched": phrase})
             weighted += PREFERENCE_WEIGHT
 
@@ -293,9 +301,18 @@ def evaluate_for_channel(
 def combine_score(signal_score: int | None, relevance: RelevanceResult) -> tuple[int | None, str]:
     """The channel-specific Opportunity Score.
 
-    Two real inputs: the channel-independent signal already measured on the trend row,
-    and this channel's relevance. When either is genuinely unknown the result is
-    ``None`` with a status saying which — never a number standing in for a missing one.
+    Two real inputs, and **both are required**:
+
+    * The signal says whether the story is moving, crowded and well-sourced. It says
+      nothing about whether this channel should cover it.
+    * Relevance says whether it fits this channel. It says nothing about whether the
+      story is worth covering at all.
+
+    Each is blind to what the other measures, so a score built on one of them would
+    be a different quantity wearing this one's name. When either is unknown the
+    result is ``None`` with a status saying which — never a number standing in for a
+    missing one. A channel whose sources yield too little signal therefore sees
+    "insufficient data" rather than a reassuring number built from keyword overlap.
     """
     if relevance.is_excluded:
         return None, ScoreStatus.EXCLUDED.value
