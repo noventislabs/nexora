@@ -108,6 +108,13 @@ class ChannelSettings(Base, TimestampMixin):
     #: Minimum documents a research run must stand on before it will produce a script.
     research_min_documents: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
 
+    #: YouTube requires every upload to declare whether it is made for children, and
+    #: the declaration carries legal weight (COPPA in the US). NULL means *undecided*,
+    #: which blocks publishing — this must never be silently defaulted either way.
+    made_for_kids_default: Mapped[bool | None] = mapped_column(Boolean)
+    #: The YouTube category id applied to uploads, e.g. "28" (Science & Technology).
+    youtube_category_id: Mapped[str | None] = mapped_column(String(16))
+
     channel: Mapped[Channel] = relationship(back_populates="settings")
 
 
@@ -171,6 +178,13 @@ class YouTubeConnection(Base, TimestampMixin):
     youtube_channel_id: Mapped[str | None] = mapped_column(String(64), index=True)
     youtube_channel_title: Mapped[str | None] = mapped_column(String(255))
     youtube_custom_url: Mapped[str | None] = mapped_column(String(255))
+
+    #: A channel id verified through a *public* Data API read. This identifies the
+    #: channel but grants nothing: uploading still requires the OAuth connection
+    #: above. Kept separate so a public lookup can never be mistaken for consent.
+    public_channel_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    public_channel_title: Mapped[str | None] = mapped_column(String(255))
+    public_verified_at = utc_column()
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default=ConnectionStatus.NOT_CONNECTED.value
     )
