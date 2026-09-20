@@ -42,6 +42,40 @@ This is enforced in code, not just in copy:
 - Identifying a YouTube channel by its id is never presented as permission to upload
   to it. Upload, channel analytics, revenue and public read are four separate
   capabilities, shown separately as `GRANTED` / `NOT GRANTED`.
+- NEXORA holds **no demographic data about your viewers and models none**. "Audience
+  relevance" means text matched against categories and phrases you configured, and
+  every match names the keyword that fired. A channel with nothing configured is
+  reported as `INSUFFICIENT_DATA`, never as a low score.
+- A channel's audience is never inferred from its name or its categories, and it is
+  never derived to or from YouTube's made-for-kids declaration.
+
+## Multi-channel
+
+NEXORA is a multi-channel content operating system, not a product built around one
+channel's subject matter. One account can run a kids channel, an anime channel, a
+gaming channel and a finance channel side by side.
+
+Each channel has its own profile — audience, categories, languages, brand voice,
+preferred topics, blocked topics, content exclusions — and its own sources, pipeline,
+YouTube connection and analytics. Nothing crosses between them: one channel's trends
+never rank for another, and one channel's blocked topics never exclude anything for its
+sibling.
+
+Trend **ingestion is shared, ranking is per channel**. A feed added as a shared source
+is fetched once for the account and stored once; each channel then reaches its own
+verdict about every story in it. The same AI story comes back `RELEVANT` for the
+technology channel and `LOW_RELEVANCE` for the kids channel, each with its own reasons
+attached.
+
+The content vocabulary is stored data, not a fixed list. 26 categories ship seeded —
+kids, family, anime, animation, gaming, entertainment, music, education, science,
+technology, AI, future, business, finance, digital economy, news, global developments,
+history, documentary, commentary, lifestyle, health, sports, travel, food, DIY — and a
+channel can add its own or redefine one for itself.
+
+A blocked topic **excludes** an item rather than ranking it low: it is not scored, not
+listed, and never offered as evidence when topics are generated. Ranking something you
+forbade, even at the bottom, would be quietly ignoring the instruction.
 
 ## Architecture
 

@@ -45,12 +45,12 @@ requires editing a call site.
 
 ## Data model
 
-34 tables. Grouped by area:
+37 tables. Grouped by area:
 
 - **Identity** — `users`, `auth_sessions`, `channels`, `channel_settings`,
-  `automation_settings`, `youtube_connections`, `oauth_states`
-- **Trends** — `trend_sources`, `trending_topics`, `topic_candidates`, `topic_research`,
-  `research_documents`
+  `channel_profiles`, `automation_settings`, `youtube_connections`, `oauth_states`
+- **Trends** — `trend_sources`, `trending_topics`, `content_categories`,
+  `channel_topic_relevance`, `topic_candidates`, `topic_research`, `research_documents`
 - **Content** — `content_projects`, `content_scripts`, `script_versions`, `fact_checks`,
   `metadata_versions`, `quality_checks`, `copyright_checks`
 - **Media** — `video_assets`, `voice_jobs`, `video_projects`, `video_render_jobs`, `thumbnails`
@@ -82,6 +82,106 @@ Job types: `trend_scan`, `topic_generation`, `research`, `script_generation`,
 `fact_check`, `voice_generation`, `asset_collection`, `video_render`,
 `thumbnail_generation`, `metadata_generation`, `quality_check`, `youtube_upload`,
 `analytics_sync`, `automation_tick`, `automation_advance`.
+
+## Multi-channel architecture
+
+NEXORA is not built around one channel. A user owns any number of channels, each with
+its own profile, sources, pipeline, YouTube connection and analytics, and nothing
+crosses between them.
+
+```
+User
+ └── Channel
+      ├── Channel profile        who it is for
+      ├── Primary categories     on the channel row
+      ├── Trend sources          its own, plus the account's shared ones
+      ├── Relevance records      one per (channel, trend)
+      ├── Content pipeline       research → script → media → publish
+      ├── YouTube OAuth
+      └── Analytics
+```
+
+Ingestion is global; ranking is per channel:
+
+```
+GLOBAL TREND INGESTION      shared sources fetched once for the account
+        ↓
+NORMALIZED TREND DATABASE   trending_topics, with a channel-independent signal_score
+        ↓
+CHANNEL RELEVANCE ENGINE    channel_topic_relevance, one row per (channel, trend)
+        ↓
+CHANNEL-SPECIFIC CANDIDATES → research → script → media → publish → analytics
+```
+
+Three channels reading the same feed fetch it once and store the story once. Each then
+reaches its own verdict about it. A channel-scoped source still exists for a feed that
+only makes sense for one channel; its rows carry that `channel_id` and no other channel
+can see them.
+
+### The content vocabulary
+
+Categories live in `content_categories`, not in Python. The seed spans 26 categories —
+kids, family, anime, animation, gaming, entertainment, music, education, science,
+technology, AI, future, business, finance, digital economy, news, global developments,
+history, documentary, commentary, lifestyle, health, sports, travel, food, DIY — and a
+channel may add its own, or override a shared one for itself by defining a category
+with the same key.
+
+Each category carries the `keywords` the relevance engine matches on. That is the whole
+mechanism, and it is why a match can always name the word that fired.
+
+### Channel profile
+
+`channel_profiles` holds what the relevance engine reads: audience description and
+classification, secondary categories, region, secondary languages and whether
+translation is enabled, short/long-form, brand voice, preferred topics, blocked topics,
+content exclusions and sensitive-content restrictions.
+
+`audience_classification` is nullable and is **never inferred**. A channel called
+"Kiddo Anime Tales" sitting in the kids category still has it NULL until a person sets
+it. It is also kept strictly separate from `made_for_kids_default`: one is NEXORA's
+editorial notion of the audience, the other is a legal declaration YouTube requires,
+and neither is ever derived from the other.
+
+NEXORA holds no demographic data about viewers and models none. "Audience relevance"
+here means text matching against stored configuration — nothing more is claimed.
+
+### Channel relevance
+
+One `channel_topic_relevance` row per (channel, trend), carrying the whole trace:
+`matched_categories` (with the keywords that fired), `matched_preferences`,
+`excluded_by_rules`, an ordered `relevance_reasons` list, `available_source_count` and
+`freshness`.
+
+Rules run in this order:
+
+1. **Exclusions.** A blocked topic, content exclusion or sensitive-content restriction
+   matching the text excludes the item outright — status `EXCLUDED`, no score at all.
+   Ranking a forbidden topic at the bottom of the list would quietly ignore the
+   operator's instruction, and an excluded row is never offered as evidence either.
+2. **Language.** An item in a language the channel does not work in is excluded, unless
+   translation is enabled, in which case it is kept and flagged.
+3. **Category and preference matching**, at three weights: primary category 1.0,
+   secondary 0.5, explicit preferred topic 1.5.
+
+Phrases match on word boundaries, so blocking "war" does not block "warranty", and the
+two-letter category keyword "ai" still matches the word "ai".
+
+Four statuses, and `INSUFFICIENT_DATA` is first-class: a channel with no categories and
+no preferred topics gives nothing to match against, and saying so is more honest than
+returning a low number.
+
+| Status | Meaning |
+|---|---|
+| `RELEVANT` | Matched above the threshold |
+| `LOW_RELEVANCE` | Matched weakly or not at all |
+| `EXCLUDED` | Matched a rule the operator configured |
+| `INSUFFICIENT_DATA` | Nothing configured to match against, or no usable item text |
+
+Relevance is **stored**, not computed on read, so editing a profile does not
+retroactively rewrite history. `POST /api/channels/{id}/relevance/recompute` re-ranks
+collected trends against the updated profile, and the UI says so rather than leaving
+stale verdicts to be discovered.
 
 ## Trend engine
 
@@ -121,20 +221,33 @@ Deliberately **not** a prediction of views, virality or revenue. It ranks how wo
 a topic looks given the evidence actually collected. `GET /api/trends/scoring-model`
 serves the live definition.
 
+It has two halves, because one normalized trend row serves several channels and a
+single number folding in audience relevance could be true for at most one of them:
+
 ```
-score = Σ(component_value × weight) / Σ(weight)
-        over only the components whose inputs were present
+signal    = Σ(component_value × weight) / Σ(weight)      on the trend row
+            over only the components whose inputs were present
+
+opportunity = signal × 0.65 + channel_relevance × 0.35   on the relevance row
 ```
+
+The **Signal Score** is a property of the item and identical for every channel:
 
 | Component | Weight | Requires |
 |---|---|---|
-| Trend velocity | 0.22 | An engagement figure **and** a publication time |
-| Audience relevance | 0.20 | Channel categories + item text |
-| Competition | 0.15 | A scan of ≥5 items to compare against |
-| Research material | 0.13 | A scan of ≥5 items |
-| Recency | 0.12 | A publication time |
-| Evergreen value | 0.10 | Item text |
-| Source reliability | 0.08 | Always available |
+| Trend velocity | 0.28 | An engagement figure **and** a publication time |
+| Competition | 0.19 | A scan of ≥5 items to compare against |
+| Research material | 0.16 | A scan of ≥5 items |
+| Recency | 0.15 | A publication time |
+| Evergreen value | 0.12 | Item text |
+| Source reliability | 0.10 | Always available |
+
+Both halves are required. Each is blind to what the other measures — the signal cannot
+say whether a channel should cover a story, and relevance cannot say whether the story
+is worth covering — so an Opportunity Score built on one of them would be a different
+quantity wearing this one's name. When either is unknown, the score is `null` with a
+status naming which. A channel whose sources yield too little signal therefore sees
+"insufficient data" rather than a reassuring number built from keyword overlap.
 
 A component with a missing input is **dropped**, not defaulted. If the computable
 components carry less than 50% of the total weight, the score is reported as
@@ -152,8 +265,14 @@ The LLM proposes an editorial angle; everything checkable is computed in code:
 
 * Candidates cite trend rows by index. A candidate whose citations cannot be resolved
   is **dropped**, not stored with bare text.
-* `opportunity_score` is inherited from the highest-scoring cited item. The model is
+* `opportunity_score` is inherited from the cited item **this channel** ranked
+  highest — its relevance row, not the trend's channel-independent signal. The model is
   never asked for a score, and a score it volunteers is ignored.
+* Evidence is ordered by this channel's relevance, and an excluded row is never passed
+  to the model at all.
+* The prompt carries the channel's profile — audience, brand voice, preferred topics
+  and a `must_not_cover` list — so the same evidence pool produces visibly different
+  topics for a kids channel and a finance one.
 * Category is accepted only if the channel actually configured it.
 * Freshness comes from the cited evidence timestamps, not from generation time.
 
