@@ -13,17 +13,8 @@ import {
   StatusPill,
 } from "@/components/primitives";
 import { YouTubeConnectionCard } from "@/components/youtube-connection";
-import type { Channel, Paged } from "@/lib/types";
-
-const CATEGORIES = [
-  "business",
-  "technology",
-  "future",
-  "ai",
-  "science",
-  "digital_economy",
-  "global_developments",
-] as const;
+import { ChannelProfileEditor } from "@/components/channel-profile";
+import type { Channel, ContentCategory, Paged } from "@/lib/types";
 
 export default function ChannelsPage() {
   return (
@@ -72,7 +63,16 @@ function OAuthResultBanner() {
 function ChannelsView() {
   const channels = useApi<Paged<Channel>>("/api/channels");
   const [creating, setCreating] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<{ id: string; panel: "youtube" | "profile" } | null>(
+    null,
+  );
+
+  const isOpen = (id: string, panel: "youtube" | "profile") =>
+    expanded?.id === id && expanded.panel === panel;
+  const toggle = (id: string, panel: "youtube" | "profile") =>
+    setExpanded((current) =>
+      current?.id === id && current.panel === panel ? null : { id, panel },
+    );
 
   if (channels.status === "loading") return <Loading label="Loading channels" />;
   if (channels.status === "error") return <ErrorNotice message={channels.error.message} />;
@@ -131,22 +131,31 @@ function ChannelsView() {
                 <p className="mt-2 text-xs text-base-400">
                   {channel.youtube?.detail ?? "No YouTube channel is connected."}
                 </p>
-                <div className="mt-3">
+                <div className="mt-3 flex flex-wrap gap-2">
                   <Button
-                    onClick={() =>
-                      setExpanded((current) => (current === channel.id ? null : channel.id))
-                    }
-                    aria-expanded={expanded === channel.id}
+                    onClick={() => toggle(channel.id, "youtube")}
+                    aria-expanded={isOpen(channel.id, "youtube")}
                   >
-                    {expanded === channel.id ? "Hide connection" : "Manage YouTube"}
+                    {isOpen(channel.id, "youtube") ? "Hide connection" : "Manage YouTube"}
+                  </Button>
+                  <Button
+                    onClick={() => toggle(channel.id, "profile")}
+                    aria-expanded={isOpen(channel.id, "profile")}
+                  >
+                    {isOpen(channel.id, "profile") ? "Hide profile" : "Channel profile"}
                   </Button>
                 </div>
-                {expanded === channel.id && (
+                {isOpen(channel.id, "youtube") && (
                   <div className="mt-4">
                     <YouTubeConnectionCard
                       channelId={channel.id}
                       onChanged={channels.refresh}
                     />
+                  </div>
+                )}
+                {isOpen(channel.id, "profile") && (
+                  <div className="mt-4">
+                    <ChannelProfileEditor channelId={channel.id} />
                   </div>
                 )}
               </div>
@@ -168,13 +177,16 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function CreateChannelForm({ onCreated }: { onCreated: () => void }) {
-  const [name, setName] = useState("NEXORA Global");
+  const [name, setName] = useState("");
   const [timezone, setTimezone] = useState("Asia/Dhaka");
   const [primary, setPrimary] = useState("en");
-  const [secondary, setSecondary] = useState("bn");
-  const [selected, setSelected] = useState<string[]>(["business", "technology", "ai", "future"]);
+  const [secondary, setSecondary] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Read from the API: the vocabulary is stored data a channel can extend, so any
+  // list hard-coded here would silently narrow what NEXORA supports.
+  const catalog = useApi<{ items: ContentCategory[] }>("/api/categories");
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -202,38 +214,54 @@ function CreateChannelForm({ onCreated }: { onCreated: () => void }) {
     <Card title="New channel">
       <form onSubmit={submit} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Input label="Name" value={name} onChange={setName} required />
+          <Input label="Name" value={name} onChange={setName} placeholder="e.g. Kiddo Anime Tales" required />
           <Input label="Timezone (IANA)" value={timezone} onChange={setTimezone} required />
           <Input label="Primary language" value={primary} onChange={setPrimary} required />
           <Input label="Secondary language" value={secondary} onChange={setSecondary} />
         </div>
 
         <fieldset>
-          <legend className="mb-2 text-xs text-base-400">Content categories</legend>
-          <div className="flex flex-wrap gap-2">
-            {CATEGORIES.map((category) => {
-              const active = selected.includes(category);
-              return (
-                <button
-                  key={category}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() =>
-                    setSelected((current) =>
-                      active ? current.filter((c) => c !== category) : [...current, category],
-                    )
-                  }
-                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                    active
-                      ? "border-accent-600 bg-accent-600/15 text-accent-400"
-                      : "border-base-600 bg-base-850 text-base-400 hover:text-base-200"
-                  }`}
-                >
-                  {category.replace(/_/g, " ")}
-                </button>
-              );
-            })}
-          </div>
+          <legend className="mb-2 text-xs text-base-400">
+            Content categories — what this channel is about
+          </legend>
+          {catalog.status === "loading" ? (
+            <Loading label="Loading categories" />
+          ) : catalog.status === "error" ? (
+            <ErrorNotice message={catalog.error.message} />
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {catalog.data.items.map((category) => {
+                const active = selected.includes(category.key);
+                return (
+                  <button
+                    key={category.key}
+                    type="button"
+                    aria-pressed={active}
+                    title={`Keywords: ${category.keywords.slice(0, 8).join(", ")}`}
+                    onClick={() =>
+                      setSelected((current) =>
+                        active
+                          ? current.filter((c) => c !== category.key)
+                          : [...current, category.key],
+                      )
+                    }
+                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                      active
+                        ? "border-accent-600 bg-accent-600/15 text-accent-400"
+                        : "border-base-600 bg-base-850 text-base-400 hover:text-base-200"
+                    }`}
+                  >
+                    {category.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <p className="mt-2 text-[11px] text-base-500">
+            Pick what this channel actually covers. Each channel is matched against
+            trends independently, so a kids channel and a technology channel on the same
+            account rank the same trend differently.
+          </p>
         </fieldset>
 
         {error && <ErrorNotice message={error} />}

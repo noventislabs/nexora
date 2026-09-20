@@ -14,6 +14,7 @@ import {
   formatAge,
 } from "@/components/primitives";
 import { OpportunityScore } from "@/components/opportunity-score";
+import { RelevanceBadge, RelevanceSummary } from "@/components/relevance";
 import type {
   Paged,
   ScanResponse,
@@ -150,8 +151,16 @@ function TrendRow({ trend }: { trend: Trend }) {
             <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-base-400">{trend.summary}</p>
           )}
         </div>
-        <OpportunityScore score={trend.opportunity_score} breakdown={trend.score_breakdown} />
+        <div className="flex flex-col items-end gap-1.5">
+          <OpportunityScore
+            score={trend.opportunity_score}
+            breakdown={trend.signal_breakdown}
+          />
+          {trend.relevance && <RelevanceBadge status={trend.relevance.status} />}
+        </div>
       </div>
+
+      {trend.relevance && <RelevanceSummary relevance={trend.relevance} />}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-base-500">
         <span className="font-mono text-base-400">{trend.source.name}</span>
@@ -160,6 +169,7 @@ function TrendRow({ trend }: { trend: Trend }) {
         {trend.region && <span>{trend.region}</span>}
         <FreshnessTag trend={trend} />
         <span>discovered {formatAge(ageOf(trend.discovered_at))}</span>
+        {trend.scope === "shared" && <span title="Ingested once for this account and ranked separately by each channel.">shared source</span>}
         {trend.corroboration_count > 1 && (
           <span className="text-accent-400">
             {trend.corroboration_count} sources carry this story

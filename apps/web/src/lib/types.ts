@@ -209,9 +209,16 @@ export type Trend = {
   engagement: Record<string, number>;
   corroboration_count: number;
   duplicate_of_id: string | null;
-  opportunity_score: number | null;
-  score_breakdown: ScoreBreakdown | null;
+  /** Channel-independent. Identical for every channel that can see this row. */
+  signal_score: number | null;
+  signal_breakdown: ScoreBreakdown | null;
   scored_at: string | null;
+  /** "shared" rows are ingested once for the account and ranked per channel. */
+  scope: "channel" | "shared";
+  /** This channel's verdict. `null` until the row has been ranked for it. */
+  relevance: ChannelRelevance | null;
+  /** Signal combined with relevance, for the channel that asked. */
+  opportunity_score: number | null;
 };
 
 export type TrendSource = {
@@ -745,4 +752,102 @@ export type PublishJob = {
   finished_at: string | null;
   preflight: Record<string, unknown>;
   created_at: string | null;
+};
+
+// -------------------------------------------------- Phase 6: channel intelligence
+
+export type ContentCategory = {
+  id: string;
+  key: string;
+  label: string;
+  description: string | null;
+  /** What the relevance engine matches on. Shown so a match is never a black box. */
+  keywords: string[];
+  audience_hint: string | null;
+  is_builtin: boolean;
+  is_channel_owned: boolean;
+  sort_order: number;
+};
+
+export type AudienceClassification = "kids" | "family" | "teen" | "general" | "mature";
+
+export type ChannelProfile = {
+  channel_id: string;
+  audience_description: string | null;
+  primary_categories: string[];
+  secondary_categories: string[];
+  /** `null` means undeclared. It is never inferred from the channel's name. */
+  audience_classification: AudienceClassification | null;
+  country_region: string | null;
+  primary_language: string;
+  secondary_languages: string[];
+  translation_enabled: boolean;
+  short_form_enabled: boolean;
+  long_form_enabled: boolean;
+  preferred_duration_seconds: number | null;
+  target_videos_per_week: number | null;
+  brand_voice: string | null;
+  preferred_topics: string[];
+  blocked_topics: string[];
+  content_exclusions: string[];
+  sensitive_content_restrictions: string[];
+  profile_completed_at: string | null;
+  is_complete: boolean;
+  incomplete_fields: string[];
+  matching_inputs: {
+    primary_categories: string[];
+    secondary_categories: string[];
+    preferred_topics: string[];
+    blocked_topics: string[];
+    content_exclusions: string[];
+    sensitive_content_restrictions: string[];
+    languages: string[];
+    audience_classification: string | null;
+    has_matchable_configuration: boolean;
+  };
+  note: string;
+};
+
+export type ProfileOptions = {
+  categories: ContentCategory[];
+  audience_classifications: { value: AudienceClassification; label: string }[];
+  audience_note: string;
+};
+
+export type RelevanceStatus =
+  | "RELEVANT"
+  | "LOW_RELEVANCE"
+  | "EXCLUDED"
+  | "INSUFFICIENT_DATA";
+
+export type MatchedCategory = {
+  category: string;
+  tier: "primary" | "secondary";
+  keywords: string[];
+};
+
+export type ChannelRelevance = {
+  status: RelevanceStatus;
+  /** `null` when there was nothing to match against — never rendered as 0. */
+  relevance_score: number | null;
+  score: number | null;
+  score_status: "SCORED" | "INSUFFICIENT_DATA" | "EXCLUDED";
+  matched_categories: MatchedCategory[];
+  matched_preferences: { preference: string; matched: string }[];
+  excluded_by_rules: { rule: string; value: string; detail: string }[];
+  relevance_reasons: { code: string; detail: string }[];
+  available_source_count: number;
+  freshness: string | null;
+  computed_at: string | null;
+  score_breakdown: Record<string, unknown> | null;
+};
+
+export type RelevanceExplanation = {
+  channel_id: string;
+  channel_name: string;
+  trending_topic_id: string;
+  title: string;
+  signal_score: number | null;
+  matching_inputs: ChannelProfile["matching_inputs"];
+  relevance: ChannelRelevance;
 };
