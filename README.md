@@ -167,12 +167,44 @@ Never commit `.env`; it is git-ignored, and `.env.example` contains placeholders
 | Require fact check to pass | ON |
 | Upload privacy | **private** |
 | Made-for-kids declaration | **NOT DECLARED** — blocks publishing until set |
+| Automation | **OFF** |
+| Commentary fact-check exemption | **OFF** |
 
 Two contradictions are impossible by construction: auto-publishing cannot be enabled
 while human approval is required, and autonomous mode cannot be selected without
 turning the autopilot switch on in the same request. An **emergency stop** immediately
 disables autopilot, disables auto-publishing and cancels queued publish jobs; clearing
 it does *not* silently re-enable automation.
+
+### Autopilot
+
+Three levels. Assisted and semi-autonomous **cannot publish at all**; only autonomous
+can, and only with auto-publish on, human approval off, publishing on and the day's
+limit unspent.
+
+| Level | Discovers | Researches | Writes | Produces | Runs checks | Publishes |
+|---|---|---|---|---|---|---|
+| Assisted | ✓ | ✓ | ✓ | ✓ | | |
+| Semi-autonomous | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Autonomous | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+A **global emergency stop** halts every channel of every user, cancels queued upload
+jobs, and is checked on the server before every stage of every run — not once when a
+run starts, and not only in the browser. Releasing it turns nothing back on: each
+channel keeps the settings it had, so clearing a stop is never a way to enable
+autopilot. Channels have their own stop, plus independent `automation_enabled` and
+`publishing_enabled` switches.
+
+Automation cannot publish a claim its own research does not support. `CONTRADICTED`,
+`UNVERIFIED` and `INSUFFICIENT_SOURCES` claims each block it. A person may still
+publish manually after reading them — they can check a source automation cannot reach.
+
+The daily limit counts **only uploads verified on YouTube**. Three failed attempts have
+published nothing and do not consume the day's budget.
+
+Two workers never build the same video: topic claims are database rows with a unique
+constraint, not Redis keys, and duplicate topics are caught by deterministic token
+overlap against the channel's own projects, published videos and rejected topics.
 
 Publishing adds its own gates. `GET /api/publish/preflight/{project_id}` returns every
 gate and its current state — emergency stop, rate limits, publishing window, render,

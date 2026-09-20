@@ -45,10 +45,11 @@ requires editing a call site.
 
 ## Data model
 
-37 tables. Grouped by area:
+38 tables. Grouped by area:
 
 - **Identity** — `users`, `auth_sessions`, `channels`, `channel_settings`,
   `channel_profiles`, `automation_settings`, `youtube_connections`, `oauth_states`
+- **Automation** — `automation_runs`, `automation_locks`
 - **Trends** — `trend_sources`, `trending_topics`, `content_categories`,
   `channel_topic_relevance`, `topic_candidates`, `topic_research`, `research_documents`
 - **Content** — `content_projects`, `content_scripts`, `script_versions`, `fact_checks`,
@@ -56,7 +57,7 @@ requires editing a call site.
 - **Media** — `video_assets`, `voice_jobs`, `video_projects`, `video_render_jobs`, `thumbnails`
 - **Publishing & analytics** — `publish_jobs`, `youtube_videos`, `analytics_snapshots`,
   `performance_observations`, `content_performance_features`
-- **System** — `jobs`, `job_logs`, `automation_runs`, `audit_logs`, `system_settings`
+- **System** — `jobs`, `job_logs`, `audit_logs`, `system_settings`
 
 Every datetime column is timezone-aware; the application works in UTC and converts to
 the channel timezone only at the presentation edge.
@@ -564,6 +565,114 @@ otherwise.
 `category_performance()` reports median views per topic category within one channel,
 with a per-category sample size and an `INSUFFICIENT_DATA` status for any category
 below the threshold.
+
+## Autonomous automation
+
+One traversal of the pipeline for one channel, from a collected trend to a verified
+upload. The orchestrator holds a channel lock for the whole run, records each stage on
+the `automation_runs` row, and resumes at the stage it died on rather than repeating an
+LLM call and a render.
+
+```
+select_topic → research → script → fact_check → voice → render
+             → thumbnail → metadata → quality_check → publish
+```
+
+A stage that cannot proceed sets a `stopped_reason` and the run ends cleanly as
+STOPPED. "No topic was relevant enough today" is the system working, not an error. A
+missing credential stops a run rather than failing it — a setup gap is a to-do, not a
+crash — while a stage that genuinely raises is recorded in the stage list before the
+run is marked FAILED.
+
+### The stops, strictest first
+
+| Scope | Halts |
+|---|---|
+| Global emergency stop (`system_settings`) | Every channel of every user |
+| Channel emergency stop | One channel |
+| `automation_enabled` | Producing content on one channel |
+| `publishing_enabled` | Uploading from one channel, automated or manual |
+
+Checked **server-side before every stage**, not once at the start: a run may take an
+hour, and an operator who engages the stop during it expects the render in progress to
+be the last thing that happens. Engaging the global stop also cancels queued upload and
+automation jobs, since a queued job would otherwise run after the stop.
+
+Releasing a stop re-enables nothing. Every channel keeps the settings it had, so
+clearing a stop can never be a way to turn autopilot on.
+
+### Levels
+
+| Level | Discover | Research | Write | Produce | Run checks | Publish |
+|---|---|---|---|---|---|---|
+| Assisted | ✓ | ✓ | ✓ | ✓ | | |
+| Semi-autonomous | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Autonomous | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Autonomous publishing additionally requires `auto_publish_enabled`,
+`publishing_enabled`, `require_human_approval` off, and the daily limit unspent.
+Validation refuses configurations that contradict each other: autopilot cannot be on
+while automation is off, auto-publish cannot be on while publishing is off or approval
+is required, and an engaged stop blocks re-enabling any of them.
+
+### Locks
+
+`automation_locks` rows with a **partial unique index** on `(channel_id, lock_key)
+WHERE released_at IS NULL`. Redis is the queue's wake-up signal and can lose a message;
+losing a lock would let two workers research, script, render and upload the same topic,
+and the second upload cannot be taken back.
+
+An expired lock can be taken over so a worker that died mid-render does not strand its
+channel, and the takeover is written onto the old row rather than overwriting it. A
+released lock stays as the record that the run happened.
+
+### Deduplication
+
+Jaccard overlap on a fingerprint of significant tokens: deterministic, and recomputable
+by hand from the stored `significant_tokens`. Never a similarity number a model
+produced.
+
+Checked against this channel's projects from the last 45 days, videos it published in
+the last 90, and topics an operator already rejected. Scoped to one channel throughout
+— two channels covering the same story is normal; the same channel doing it twice is
+the problem. A topic with fewer than 3 distinctive tokens gets no fingerprint at all,
+because a two-word fingerprint would match everything and silently drop real videos.
+
+### The fact-check gate
+
+Five per-claim verdicts, because the differences change what an operator should do:
+
+| Verdict | Meaning | Blocks automated publishing |
+|---|---|---|
+| `SUPPORTED` | A research document that exists says this | |
+| `PARTIALLY_SUPPORTED` | The research says something weaker | only if the channel requires a clean pass |
+| `CONTRADICTED` | The research recorded disagreement the script resolves anyway | ✓ |
+| `UNVERIFIED` | The research exists; none of it supports this | ✓ |
+| `INSUFFICIENT_SOURCES` | Too little research to check anything | ✓ |
+
+The rule: **an unverified claim is never turned into a factual statement by publishing
+it.** A person may read a flagged claim and decide it is fine — they can check a source
+automation cannot reach. Automation has no such option, so where a person may proceed
+with a warning, automation stops.
+
+One exception, off by default: a project explicitly marked as `commentary` on a channel
+with `allow_unverified_commentary` may publish unverified premises as labelled opinion.
+It never applies to the default `explainer` format, and never to a `CONTRADICTED` claim
+— calling something opinion must not be a way around sources that actively disagree.
+
+### Daily limits
+
+Counted in the channel's own timezone, because "one per day" means one per the
+operator's day. **Only a publish job verified on YouTube counts as published.** A
+failed or unverified upload has published nothing and does not consume the day's
+budget; failures are reported as a warning instead.
+
+### Channel scoping
+
+Every automation job carries `user_id` and `channel_id`, and
+`gates.require_ownership` checks them against each other before the run starts. Without
+it, a tampered `channel_id` would publish one user's content to another user's channel
+using that channel's OAuth token.
 
 ## Frontend
 
