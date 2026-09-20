@@ -16,24 +16,25 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nexora.core.errors import Conflict, NotFound, PermissionDenied, ValidationError
-from nexora.db.models import AutomationSettings, Channel, ChannelSettings, User, YouTubeConnection
+from nexora.db.models import (
+    AutomationSettings,
+    Channel,
+    ChannelProfile,
+    ChannelSettings,
+    User,
+    YouTubeConnection,
+)
 from nexora.db.models.enums import AutomationMode, ConnectionStatus, VideoFormat
 
 DEFAULT_CHANNEL_NAME = "NEXORA Global"
 DEFAULT_PRIMARY_LANGUAGE = "en"
 DEFAULT_SECONDARY_LANGUAGE = "bn"
 DEFAULT_TIMEZONE = "Asia/Dhaka"
+#: What a channel gets when the caller names no categories. A starting point for the
+#: first channel, never a statement about what NEXORA can cover — the vocabulary lives
+#: in the ``content_categories`` table and spans kids, anime, gaming, education,
+#: entertainment, news and more.
 DEFAULT_CATEGORIES = ["business", "technology", "ai", "future"]
-
-SUPPORTED_CATEGORIES = [
-    "business",
-    "technology",
-    "future",
-    "ai",
-    "science",
-    "digital_economy",
-    "global_developments",
-]
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -51,15 +52,33 @@ def validate_timezone(name: str) -> str:
     return name
 
 
-def validate_categories(categories: list[str] | None) -> list[str]:
+def validate_categories(
+    session: Session,
+    categories: list[str] | None,
+    *,
+    channel_id: uuid.UUID | None = None,
+) -> list[str]:
+    """Check categories against the stored vocabulary, not a hard-coded list.
+
+    The vocabulary is a database table a channel can extend, so a kids/anime channel
+    and a finance channel are equally first-class. An unknown key is still rejected —
+    silently accepting a typo would leave the operator with a category that can never
+    match anything.
+    """
+    from nexora.services import categories as category_service
+
     if categories is None:
         return list(DEFAULT_CATEGORIES)
-    cleaned = []
+
+    known = category_service.known_keys(session, channel_id)
+    cleaned: list[str] = []
     for item in categories:
-        key = str(item).strip().lower().replace(" ", "_").replace("-", "_")
-        if key not in SUPPORTED_CATEGORIES:
+        key = category_service.normalize_key(str(item))
+        if key not in known:
             raise ValidationError(
-                f"Unsupported category '{item}'. Supported: {', '.join(SUPPORTED_CATEGORIES)}."
+                f"Unknown category '{item}'. Choose one of the configured categories, or "
+                "add it to this channel's vocabulary first.",
+                details={"unknown_category": key, "known_categories": sorted(known)},
             )
         if key not in cleaned:
             cleaned.append(key)
@@ -97,7 +116,7 @@ def create_channel(
         primary_language=primary_language,
         secondary_language=secondary_language,
         timezone=validate_timezone(timezone),
-        categories=validate_categories(categories),
+        categories=validate_categories(session, categories),
         branding={},
     )
     session.add(channel)
@@ -126,6 +145,10 @@ def create_channel(
     session.add(
         YouTubeConnection(channel_id=channel.id, status=ConnectionStatus.NOT_CONNECTED.value, scopes=[])
     )
+    # Every channel gets a profile row immediately, with audience_classification left
+    # NULL. The UI reports the profile as incomplete rather than pretending the
+    # defaults were chosen deliberately.
+    session.add(ChannelProfile(channel_id=channel.id))
     session.flush()
     return channel
 

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from nexora.core.errors import Conflict, NotFound, ValidationError
 from nexora.db.models import TrendSource
-from nexora.db.models.enums import ComponentStatus, TrendSourceKind
+from nexora.db.models.enums import ComponentStatus, SourceScope, TrendSourceKind
 from nexora.services.providers.base import Availability
 from nexora.services.providers.trends import build_provider
 
@@ -87,7 +87,19 @@ def create_source(
     reliability: float | None = None,
     region: str | None = None,
     min_interval_minutes: int = 60,
+    scope: str = SourceScope.CHANNEL.value,
+    user_id: uuid.UUID | None = None,
 ) -> TrendSource:
+    """Create a trend source.
+
+    A ``shared`` source is ingested once for the whole account and ranked separately
+    by each of the owner's channels, so three channels reading the same feed do not
+    fetch it three times or store the story three times.
+    """
+    if scope not in {item.value for item in SourceScope}:
+        raise ValidationError(f"'{scope}' is not a valid source scope.")
+    if scope == SourceScope.SHARED.value and user_id is None:
+        raise ValidationError("A shared source must name the user who owns it.")
     source_name = (name or "").strip()
     if not source_name:
         raise ValidationError("Source name is required.")
@@ -97,18 +109,25 @@ def create_source(
         )
 
     cleaned = validate_config(kind, config or {})
+    shared = scope == SourceScope.SHARED.value
+    owner_condition = (
+        TrendSource.user_id == user_id if shared else TrendSource.channel_id == channel_id
+    )
     existing = session.execute(
         select(TrendSource).where(
-            TrendSource.channel_id == channel_id,
+            owner_condition,
             TrendSource.kind == kind,
             TrendSource.name == source_name,
         )
     ).scalar_one_or_none()
     if existing is not None:
-        raise Conflict(f"A {kind} source named '{source_name}' already exists for this channel.")
+        where = "for this account" if shared else "for this channel"
+        raise Conflict(f"A {kind} source named '{source_name}' already exists {where}.")
 
     source = TrendSource(
-        channel_id=channel_id,
+        channel_id=None if shared else channel_id,
+        user_id=user_id,
+        scope=scope,
         kind=kind,
         name=source_name[:160],
         config=cleaned,
@@ -133,18 +152,36 @@ def _validated_reliability(reliability: float | None, config: dict[str, Any]) ->
     return numeric
 
 
-def get_source(session: Session, channel_id: uuid.UUID, source_id: uuid.UUID) -> TrendSource:
+def get_source(
+    session: Session,
+    channel_id: uuid.UUID,
+    source_id: uuid.UUID,
+    *,
+    user_id: uuid.UUID | None = None,
+) -> TrendSource:
     source = session.get(TrendSource, source_id)
-    if source is None or source.channel_id != channel_id:
+    if source is None:
         raise NotFound("Trend source not found.")
-    return source
+    if source.channel_id == channel_id:
+        return source
+    if user_id is not None and source.channel_id is None and source.user_id == user_id:
+        return source
+    raise NotFound("Trend source not found.")
 
 
-def list_sources(session: Session, channel_id: uuid.UUID) -> list[TrendSource]:
+def list_sources(
+    session: Session, channel_id: uuid.UUID, *, user_id: uuid.UUID | None = None
+) -> list[TrendSource]:
+    """This channel's own sources, plus the account's shared ones when the owner is known."""
+    condition = TrendSource.channel_id == channel_id
+    if user_id is not None:
+        condition = condition | (
+            TrendSource.channel_id.is_(None) & (TrendSource.user_id == user_id)
+        )
     return list(
         session.execute(
             select(TrendSource)
-            .where(TrendSource.channel_id == channel_id)
+            .where(condition)
             .order_by(TrendSource.kind.asc(), TrendSource.name.asc())
         ).scalars()
     )

@@ -76,11 +76,25 @@ def _schema() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 def _clean_tables() -> Iterator[None]:
-    """Truncate between tests so every test starts from a known empty database."""
+    """Truncate between tests so every test starts from a known empty database.
+
+    The shared content-category vocabulary is re-seeded afterwards. It is reference
+    data the migration installs, not test fixture data: a channel cannot be created
+    without it, and every deployment has it.
+    """
+    from nexora.services.categories import seed_builtin_categories
+
     engine = get_engine()
     tables = ", ".join(f'"{name}"' for name in Base.metadata.tables if name != "alembic_version")
     with engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+
+    session = get_session_factory()()
+    try:
+        seed_builtin_categories(session)
+        session.commit()
+    finally:
+        session.close()
     yield
 
 

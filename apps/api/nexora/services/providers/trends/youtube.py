@@ -28,25 +28,58 @@ from nexora.services.providers.trends.base import (
 
 API_ROOT = "https://www.googleapis.com/youtube/v3"
 
-#: Maps NEXORA's channel categories onto YouTube's own video category ids, so a scan
-#: configured for a channel category actually filters. Keys must stay in step with
-#: ``nexora.services.channels.SUPPORTED_CATEGORIES``; an unmapped value raises rather
-#: than silently producing an unfiltered chart.
+#: Maps NEXORA's content-category vocabulary onto YouTube's own video category ids, so
+#: a scan configured for a channel category actually filters the chart it requests.
+#: Keys cover the seeded vocabulary in ``nexora.services.categories.SEED_CATEGORIES``;
+#: an unmapped value raises rather than silently producing an unfiltered chart, which
+#: is what made a technology scan quietly return music videos.
+#:
+#: A channel-invented category has no YouTube equivalent by definition. Such a scan
+#: must name a YouTube category explicitly instead of expecting one to be guessed.
 CATEGORY_IDS = {
+    # Film & Animation
+    "anime": "1",
+    "animation": "1",
+    "kids": "1",
+    # Entertainment
+    "entertainment": "24",
+    "family": "24",
+    "documentary": "24",
+    # Music
+    "music": "10",
+    # Gaming
+    "gaming": "20",
+    # Sports
+    "sports": "17",
+    # Travel & Events
+    "travel": "19",
+    # Howto & Style
+    "lifestyle": "26",
+    "health": "26",
+    "food": "26",
+    "diy": "26",
+    # Education
+    "education": "27",
+    "history": "27",
     # Science & Technology
     "technology": "28",
     "ai": "28",
     "science": "28",
     "future": "28",
-    # News & Politics — where business and policy coverage actually lives on YouTube.
+    # News & Politics — where business, finance and policy coverage lives on YouTube.
     "business": "25",
+    "finance": "25",
     "digital_economy": "25",
     "global_developments": "25",
+    "news": "25",
+    "commentary": "25",
     # Direct YouTube category names, for operators who prefer them.
+    "film_animation": "1",
     "science_technology": "28",
     "news_politics": "25",
-    "education": "27",
-    "entertainment": "24",
+    "howto_style": "26",
+    "people_blogs": "22",
+    "comedy": "23",
 }
 
 VALID_MODES = ("mostPopular", "search")

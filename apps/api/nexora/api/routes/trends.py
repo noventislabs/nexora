@@ -12,8 +12,13 @@ from sqlalchemy import func, select
 from nexora.api.deps import AuthUser, DbSession, RequestContext, Writer
 from nexora.api.schemas import ApiModel
 from nexora.core.errors import Conflict, NotFound, ValidationError
-from nexora.db.models import TopicCandidate, TrendingTopic
-from nexora.db.models.enums import ActorType, CandidateStatus, TrendSourceKind
+from nexora.db.models import ChannelTopicRelevance, TopicCandidate, TrendingTopic
+from nexora.db.models.enums import (
+    ActorType,
+    CandidateStatus,
+    RelevanceStatus,
+    TrendSourceKind,
+)
 from nexora.queue import jobs as job_queue
 from nexora.queue.types import TOPIC_GENERATION, TREND_SCAN
 from nexora.services import audit
@@ -22,6 +27,7 @@ from nexora.services.availability import (
     reddit_availability,
     youtube_data_api_availability,
 )
+from nexora.services.trends import relevance as relevance_service
 from nexora.services.trends import sources as source_service
 from nexora.services.trends.scan import freshness_of, scan_channel
 from nexora.services.trends.scoring import WEIGHTS
@@ -70,7 +76,9 @@ class TopicDecisionRequest(ApiModel):
 
 
 # ------------------------------------------------------------------------ serializers
-def _trend_dict(row: TrendingTopic) -> dict[str, Any]:
+def _trend_dict(
+    row: TrendingTopic, relevance: ChannelTopicRelevance | None = None
+) -> dict[str, Any]:
     """Serialize a trend observation. Absent facts stay null — never zero."""
     return {
         "id": str(row.id),
@@ -93,9 +101,15 @@ def _trend_dict(row: TrendingTopic) -> dict[str, Any]:
         "engagement": row.engagement or {},
         "corroboration_count": row.corroboration_count,
         "duplicate_of_id": str(row.duplicate_of_id) if row.duplicate_of_id else None,
-        "opportunity_score": row.opportunity_score,
-        "score_breakdown": row.score_breakdown,
+        # The channel-independent half of the score. The channel-specific
+        # Opportunity Score lives under "relevance", because one row serves several
+        # channels and a single number could not honestly describe all of them.
+        "signal_score": row.signal_score,
+        "signal_breakdown": row.signal_breakdown,
         "scored_at": row.scored_at.isoformat() if row.scored_at else None,
+        "scope": "shared" if row.channel_id is None else "channel",
+        "relevance": relevance_service.relevance_to_dict(relevance) if relevance else None,
+        "opportunity_score": relevance.score if relevance else None,
     }
 
 
@@ -145,48 +159,86 @@ def list_trends(
     min_score: Annotated[int | None, Query(ge=0, le=100)] = None,
     include_duplicates: bool = False,
     scored_only: bool = False,
+    exclude_blocked: bool = True,
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
     channel = _resolve_channel(db, current, channel_id)
 
-    conditions = [TrendingTopic.channel_id == channel.id]
+    # Rows this channel may rank: its own, plus the account's shared rows. Another
+    # channel's rows are never visible here.
+    conditions = [
+        (TrendingTopic.channel_id == channel.id)
+        | (TrendingTopic.channel_id.is_(None) & (TrendingTopic.user_id == current.user.id))
+    ]
     if not include_duplicates:
         conditions.append(TrendingTopic.duplicate_of_id.is_(None))
     if category:
         conditions.append(TrendingTopic.category == category)
     if source_kind:
         conditions.append(TrendingTopic.source_kind == source_kind)
-    if min_score is not None:
-        conditions.append(TrendingTopic.opportunity_score >= min_score)
-    if scored_only:
-        conditions.append(TrendingTopic.opportunity_score.is_not(None))
 
-    total = db.execute(select(func.count()).select_from(TrendingTopic).where(*conditions)).scalar_one()
-    rows = list(
-        db.execute(
-            select(TrendingTopic)
-            .where(*conditions)
-            .order_by(
-                TrendingTopic.opportunity_score.desc().nullslast(),
-                TrendingTopic.discovered_at.desc(),
-            )
-            .limit(limit)
-            .offset(offset)
-        ).scalars()
+    # Ranking is per channel, so it is read from this channel's relevance rows rather
+    # than from the trend row. An outer join keeps a not-yet-ranked row visible with an
+    # explicit null score instead of dropping it silently.
+    joined = select(TrendingTopic, ChannelTopicRelevance).outerjoin(
+        ChannelTopicRelevance,
+        (ChannelTopicRelevance.trending_topic_id == TrendingTopic.id)
+        & (ChannelTopicRelevance.channel_id == channel.id),
     )
+    if exclude_blocked:
+        conditions.append(
+            ChannelTopicRelevance.status.is_distinct_from(RelevanceStatus.EXCLUDED.value)
+        )
+    if min_score is not None:
+        conditions.append(ChannelTopicRelevance.score >= min_score)
+    if scored_only:
+        conditions.append(ChannelTopicRelevance.score.is_not(None))
+
+    total = db.execute(
+        select(func.count())
+        .select_from(TrendingTopic)
+        .outerjoin(
+            ChannelTopicRelevance,
+            (ChannelTopicRelevance.trending_topic_id == TrendingTopic.id)
+            & (ChannelTopicRelevance.channel_id == channel.id),
+        )
+        .where(*conditions)
+    ).scalar_one()
+    rows = db.execute(
+        joined.where(*conditions)
+        .order_by(
+            ChannelTopicRelevance.score.desc().nullslast(),
+            TrendingTopic.signal_score.desc().nullslast(),
+            TrendingTopic.discovered_at.desc(),
+        )
+        .limit(limit)
+        .offset(offset)
+    ).all()
+
     return {
-        "items": [_trend_dict(row) for row in rows],
+        "items": [_trend_dict(row, relevance) for row, relevance in rows],
         "total": total,
         "limit": limit,
         "offset": offset,
         "channel_id": str(channel.id),
+        "ranking_note": (
+            "Ranked for this channel. The same trend can rank differently for another "
+            "channel, because relevance is computed against each channel's own profile."
+        ),
     }
 
 
 @router.get("/scoring-model")
 def scoring_model(current: AuthUser) -> dict[str, Any]:
     """The exact Opportunity Score definition, so the number is never a black box."""
+    from nexora.services.trends.relevance import (
+        LOW_RELEVANCE_THRESHOLD,
+        PREFERENCE_WEIGHT,
+        PRIMARY_WEIGHT,
+        RELEVANCE_SHARE,
+        SECONDARY_WEIGHT,
+    )
     from nexora.services.trends.scoring import MIN_AVAILABLE_WEIGHT, VELOCITY_REFERENCE
 
     return {
@@ -196,8 +248,14 @@ def scoring_model(current: AuthUser) -> dict[str, Any]:
             "This is not a probability of views, virality or revenue. It ranks how "
             "workable a topic looks given the evidence that was actually collected."
         ),
+        "structure": (
+            "Two halves. The Signal Score is a property of the item itself and is "
+            "identical for every channel. Channel relevance is a property of the "
+            "(item, channel) pair. The Opportunity Score shown to a channel combines "
+            f"them: signal × {1 - RELEVANCE_SHARE:.2f} + relevance × {RELEVANCE_SHARE:.2f}."
+        ),
         "formula": (
-            "score = Σ(component_value × weight) / Σ(weight), over only the components "
+            "signal = Σ(component_value × weight) / Σ(weight), over only the components "
             "whose inputs were present. A component with a missing input is dropped "
             "rather than defaulted to a value."
         ),
@@ -210,12 +268,38 @@ def scoring_model(current: AuthUser) -> dict[str, Any]:
         "velocity_reference_per_hour": VELOCITY_REFERENCE,
         "components": {
             "trend_velocity": "Engagement divided by age, log-scaled against a per-source reference. Needs an engagement figure and a publication time.",
-            "audience_relevance": "Keyword overlap between the item text and the channel's configured categories.",
             "competition": "Share of other items in the same scan covering overlapping ground. Measures the configured sources only, not all of YouTube.",
             "content_availability": "Corroborating items and how many distinct source kinds carry the story.",
             "recency": "Age since publication, with a 72-hour half-life.",
             "evergreen_value": "Whether the phrasing is explainer-shaped or tied to a moment.",
             "source_reliability": "The operator-configured reliability weight of the source.",
+        },
+        "relevance": {
+            "share_of_final_score": RELEVANCE_SHARE,
+            "method": (
+                "Keyword matching between the item text and this channel's stored "
+                "configuration. Nothing here models demographics or viewer preference; "
+                "a match always names the keyword that fired."
+            ),
+            "match_weights": {
+                "primary_category": PRIMARY_WEIGHT,
+                "secondary_category": SECONDARY_WEIGHT,
+                "preferred_topic": PREFERENCE_WEIGHT,
+            },
+            "low_relevance_threshold": LOW_RELEVANCE_THRESHOLD,
+            "statuses": {
+                "RELEVANT": "Matched this channel's configuration above the threshold.",
+                "LOW_RELEVANCE": "Matched weakly or not at all.",
+                "EXCLUDED": "Matched a rule the operator configured to exclude it.",
+                "INSUFFICIENT_DATA": (
+                    "The channel has nothing configured to match against, or the item "
+                    "has no usable text. Reported as such rather than as a low score."
+                ),
+            },
+            "per_channel": (
+                "The same trend can rank differently for two channels. That is the "
+                "point: relevance is computed against each channel's own profile."
+            ),
         },
     }
 

@@ -1,4 +1,9 @@
-"""Opportunity Score: deterministic, transparent and never invented."""
+"""Signal Score: deterministic, transparent and never invented.
+
+This is the channel-independent half of the Opportunity Score. Audience relevance
+is deliberately not here — it is a property of a (trend, channel) pair and is
+tested in ``test_channel_relevance.py``.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +20,6 @@ from nexora.services.trends.scoring import (
 )
 
 NOW = datetime(2026, 9, 18, 12, 0, tzinfo=UTC)
-CATEGORIES = ["business", "technology", "ai", "future"]
 
 
 def make(title: str, **kwargs) -> NormalizedTrend:
@@ -27,7 +31,6 @@ def score(trend: NormalizedTrend, *, kind="youtube_data_api", reliability=0.9, c
         trend,
         source_kind=kind,
         source_reliability=reliability,
-        channel_categories=CATEGORIES,
         context=context,
         index=index,
         now=NOW,
@@ -92,13 +95,7 @@ def test_an_isolated_item_with_no_signal_cannot_be_scored() -> None:
 def test_score_is_unavailable_when_too_little_is_known() -> None:
     """An RSS item with no timestamp and an unmatched topic cannot be scored honestly."""
     trend = make("x y")  # no tokens of substance, no timestamps, no engagement
-    result = score_trend(
-        trend,
-        source_kind="rss",
-        source_reliability=0.7,
-        channel_categories=[],  # no categories configured either
-        now=NOW,
-    )
+    result = score_trend(trend, source_kind="rss", source_reliability=0.7, now=NOW)
     assert result.score is None
     assert result.available_weight < MIN_AVAILABLE_WEIGHT
     assert "Not enough signal" in (result.unavailable_reason or "")
@@ -135,14 +132,22 @@ def test_recency_decays_with_a_72_hour_half_life() -> None:
     assert aged == 50
 
 
-def test_audience_relevance_reflects_configured_categories() -> None:
-    on_topic = score(make("How AI model training reshapes the semiconductor market"))
-    off_topic = score(make("A recipe for sourdough bread proofing"))
-    on_value = next(c for c in on_topic.components if c.key == "audience_relevance").value
-    off_value = next(c for c in off_topic.components if c.key == "audience_relevance").value
-    assert on_value is not None and off_value is not None
-    assert on_value > off_value
-    assert off_value == 0
+def test_the_signal_score_is_the_same_whatever_channel_reads_it() -> None:
+    """The score on a trend row must not depend on any channel.
+
+    One normalized row serves a kids channel and a technology channel. If audience
+    relevance were folded in here, the stored number would be true for at most one of
+    them — so relevance lives on the per-channel record instead.
+    """
+    keys = {component.key for component in score(make("AI chips reshape manufacturing")).components}
+    assert "audience_relevance" not in keys
+    assert keys == set(WEIGHTS)
+
+    # Nothing in the scoring signature can carry a channel.
+    import inspect
+
+    parameters = set(inspect.signature(score_trend).parameters)
+    assert not any("channel" in name for name in parameters), parameters
 
 
 def test_evergreen_penalises_time_bound_phrasing() -> None:

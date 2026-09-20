@@ -1,8 +1,15 @@
-"""Opportunity Score.
+"""Signal Score — the channel-independent half of the Opportunity Score.
 
 This is a **transparent, deterministic** score. It is not a prediction, and it is
 deliberately not called a "probability of going viral" — nothing here can know that.
 It ranks how workable a topic looks *given the evidence actually collected*.
+
+It measures only what is true of the item itself: how fast it is moving, how crowded
+the coverage is, how much material exists, how fresh it is, how durable its shape is,
+and how reliable the source is. Audience relevance is deliberately **not** here,
+because it is a property of a (trend, channel) pair rather than of the trend: one
+normalized trend database serves a kids channel and a technology channel, and each
+ranks it for itself in :mod:`nexora.services.trends.relevance`.
 
 Rules that make it honest:
 
@@ -27,14 +34,15 @@ from nexora.services.providers.trends.base import NormalizedTrend
 #: Fraction of total weight that must be computable for a score to be produced.
 MIN_AVAILABLE_WEIGHT = 0.5
 
+#: Renormalized to sum to 1.0 after audience relevance moved out to the per-channel
+#: engine. The relative ordering of the remaining components is unchanged.
 WEIGHTS = {
-    "trend_velocity": 0.22,
-    "audience_relevance": 0.20,
-    "competition": 0.15,
-    "content_availability": 0.13,
-    "recency": 0.12,
-    "evergreen_value": 0.10,
-    "source_reliability": 0.08,
+    "trend_velocity": 0.28,
+    "competition": 0.19,
+    "content_availability": 0.16,
+    "recency": 0.15,
+    "evergreen_value": 0.12,
+    "source_reliability": 0.10,
 }
 
 #: Engagement-per-hour that maps to a full velocity score, per source kind. These are
@@ -43,37 +51,6 @@ VELOCITY_REFERENCE = {
     "youtube_data_api": 20000.0,
     "reddit": 400.0,
     "rss": 0.0,  # RSS exposes no engagement at all.
-}
-
-CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "business": (
-        "business", "market", "economy", "startup", "company", "revenue", "funding",
-        "investor", "acquisition", "ipo", "profit", "industry", "trade", "supply chain",
-    ),
-    "technology": (
-        "technology", "software", "hardware", "chip", "semiconductor", "cloud", "device",
-        "platform", "engineering", "developer", "open source", "cyber", "security", "data",
-    ),
-    "ai": (
-        "ai", "artificial intelligence", "machine learning", "neural", "model", "llm",
-        "robotics", "automation", "agent", "training", "inference", "gpu",
-    ),
-    "future": (
-        "future", "2030", "next decade", "forecast", "emerging", "frontier", "prediction",
-        "roadmap", "transition", "long term",
-    ),
-    "science": (
-        "science", "research", "study", "physics", "biology", "chemistry", "climate",
-        "space", "quantum", "experiment", "discovery", "peer-reviewed",
-    ),
-    "digital_economy": (
-        "digital economy", "fintech", "payments", "e-commerce", "creator economy",
-        "subscription", "marketplace", "digital currency", "remote work", "gig economy",
-    ),
-    "global_developments": (
-        "global", "international", "policy", "regulation", "government", "treaty",
-        "geopolitics", "worldwide", "nation", "summit",
-    ),
 }
 
 #: Markers that a story is tied to a moment and will date quickly.
@@ -113,7 +90,7 @@ class ScoreComponent:
 
 
 @dataclass
-class OpportunityScore:
+class SignalScore:
     score: int | None
     components: list[ScoreComponent]
     available_weight: float
@@ -131,7 +108,9 @@ class OpportunityScore:
             "components": [component.to_dict() for component in self.components],
             "method": (
                 "Weighted mean of the components below, over only the components whose "
-                "inputs were actually present. Missing inputs are dropped, never defaulted."
+                "inputs were actually present. Missing inputs are dropped, never defaulted. "
+                "This is the channel-independent signal; each channel's relevance is "
+                "combined with it separately."
             ),
             "context": self.context,
         }
@@ -233,16 +212,18 @@ def score_trend(
     *,
     source_kind: str,
     source_reliability: float,
-    channel_categories: list[str],
     context: ScanContext | None = None,
     index: int | None = None,
     now: datetime | None = None,
-) -> OpportunityScore:
-    """Score one normalized trend. Never invents an input it does not have."""
+) -> SignalScore:
+    """Score one normalized trend's channel-independent signal.
+
+    Never invents an input it does not have, and takes no channel: the result is a
+    property of the item, reusable by every channel that can see it.
+    """
     now = now or datetime.now(UTC)
     components = [
         _trend_velocity(trend, source_kind, now),
-        _audience_relevance(trend, channel_categories),
         _competition(trend, context, index),
         _content_availability(trend, context, index),
         _recency(trend, now),
@@ -256,7 +237,7 @@ def score_trend(
 
     if available_weight < MIN_AVAILABLE_WEIGHT:
         missing = [component.label for component in components if not component.available]
-        return OpportunityScore(
+        return SignalScore(
             score=None,
             components=components,
             available_weight=available_weight,
@@ -268,7 +249,7 @@ def score_trend(
         )
 
     weighted = sum((component.value or 0) * component.weight for component in available)
-    return OpportunityScore(
+    return SignalScore(
         score=int(round(weighted / available_weight)),
         components=components,
         available_weight=available_weight,
@@ -327,48 +308,6 @@ def _trend_velocity(trend: NormalizedTrend, source_kind: str, now: datetime) -> 
         f"{per_hour:,.0f} {metric}/hour over {age_hours:,.0f}h, log-scaled against a "
         f"{reference:,.0f}/hour reference for {source_kind}.",
     )
-
-
-def _audience_relevance(trend: NormalizedTrend, channel_categories: list[str]) -> ScoreComponent:
-    weight = WEIGHTS["audience_relevance"]
-    if not channel_categories:
-        return ScoreComponent(
-            "audience_relevance", "Audience relevance", weight, None,
-            "The channel has no content categories configured.",
-        )
-
-    tokens = tokenize(f"{trend.title} {trend.summary or ''}")
-    if not tokens:
-        return ScoreComponent(
-            "audience_relevance", "Audience relevance", weight, None,
-            "The item has no usable text to compare against the channel's categories.",
-        )
-
-    matched: dict[str, list[str]] = {}
-    for category in channel_categories:
-        keywords = CATEGORY_KEYWORDS.get(category, ())
-        hits = [
-            keyword
-            for keyword in keywords
-            if (" " in keyword and keyword in f"{trend.title} {trend.summary or ''}".lower())
-            or (" " not in keyword and keyword in tokens)
-        ]
-        if hits:
-            matched[category] = hits[:5]
-
-    if trend.category and trend.category in channel_categories:
-        matched.setdefault(trend.category, []).append("source category")
-
-    total_hits = sum(len(hits) for hits in matched.values())
-    # Saturates at 6 keyword hits; matching several configured categories adds more.
-    score = min(100, int(round(100 * (1 - math.exp(-total_hits / 2.5)))))
-    if not matched:
-        basis = "No configured category keyword appears in the title or summary."
-    else:
-        basis = "Matched " + "; ".join(
-            f"{category} ({', '.join(hits)})" for category, hits in matched.items()
-        )
-    return ScoreComponent("audience_relevance", "Audience relevance", weight, score, basis)
 
 
 #: Two items count as covering the same ground only if they share at least this many

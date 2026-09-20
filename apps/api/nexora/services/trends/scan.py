@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from nexora.core.errors import NexoraError, ProviderNotConfigured, RateLimited
 from nexora.core.logging import get_logger
 from nexora.db.models import Channel, TrendingTopic, TrendSource
-from nexora.db.models.enums import ActorType
+from nexora.db.models.enums import ActorType, SourceScope
 from nexora.services import audit
 from nexora.services.providers.trends import build_provider
 from nexora.services.providers.trends.base import NormalizedTrend
@@ -238,8 +238,11 @@ def _persist(
         return []
 
     by_source = {result.source_id: result for result in results}
-    existing_source_keys = _existing_dedupe_hashes(session, channel.id)
-    content_index = _existing_content_hashes(session, channel.id, now=now)
+    # Dedupe across everything this channel can see: its own rows plus the shared
+    # rows its owner ingests. Scoping to the channel alone would store a shared story
+    # twice the first time a second channel scanned the same feed.
+    existing_source_keys = _existing_dedupe_hashes(session, channel)
+    content_index = _existing_content_hashes(session, channel, now=now)
     stored: list[TrendingTopic] = []
     seen_in_batch: set[str] = set()
 
@@ -254,9 +257,13 @@ def _persist(
         content_hash = trend.content_hash()
         duplicate_of = content_index.get(content_hash)
 
+        shared = source.scope == SourceScope.SHARED.value
         row = TrendingTopic(
             source_id=source.id,
-            channel_id=channel.id,
+            # A shared row belongs to the user, not to whichever channel happened to
+            # trigger the scan, so every one of that user's channels can rank it.
+            channel_id=None if shared else channel.id,
+            user_id=channel.user_id,
             source_kind=source.kind,
             source_name=source.name,
             external_id=trend.external_id[:255],
@@ -293,23 +300,34 @@ def _persist(
     return stored
 
 
-def _existing_dedupe_hashes(session: Session, channel_id: uuid.UUID) -> set[tuple[uuid.UUID, str]]:
+def _visible_condition(channel: Channel):
+    """Rows this channel can see: its own, plus its owner's shared rows.
+
+    Never another channel's rows — mixing one audience's trends into another's is
+    exactly what the per-channel relevance design exists to prevent.
+    """
+    return (TrendingTopic.channel_id == channel.id) | (
+        TrendingTopic.channel_id.is_(None) & (TrendingTopic.user_id == channel.user_id)
+    )
+
+
+def _existing_dedupe_hashes(session: Session, channel: Channel) -> set[tuple[uuid.UUID, str]]:
     rows = session.execute(
         select(TrendingTopic.source_id, TrendingTopic.dedupe_hash).where(
-            TrendingTopic.channel_id == channel_id
+            _visible_condition(channel)
         )
     ).all()
     return {(source_id, dedupe) for source_id, dedupe in rows}
 
 
 def _existing_content_hashes(
-    session: Session, channel_id: uuid.UUID, *, now: datetime
+    session: Session, channel: Channel, *, now: datetime
 ) -> dict[str, uuid.UUID]:
     """Map content hash → the earliest original row, within the lookback window."""
     rows = session.execute(
         select(TrendingTopic.content_hash, TrendingTopic.id)
         .where(
-            TrendingTopic.channel_id == channel_id,
+            _visible_condition(channel),
             TrendingTopic.discovered_at >= now - DEDUPE_LOOKBACK,
             TrendingTopic.duplicate_of_id.is_(None),
         )
@@ -357,15 +375,47 @@ def _score(session: Session, channel: Channel, rows: list[TrendingTopic]) -> Non
             trend,
             source_kind=row.source_kind,
             source_reliability=reliabilities.get(row.source_id, 0.7),
-            channel_categories=list(channel.categories or []),
             context=context,
             index=index,
             now=now,
         )
-        row.opportunity_score = result.score
-        row.score_breakdown = result.to_dict()
+        row.signal_score = result.score
+        row.signal_breakdown = result.to_dict()
         row.scored_at = now
     session.flush()
+
+    # The signal is channel-independent, so it is computed once. Relevance is the
+    # per-channel half, and it runs for every channel that can see these rows.
+    _rank_for_channels(session, channel, rows)
+
+
+def _rank_for_channels(
+    session: Session, scanning_channel: Channel, rows: list[TrendingTopic]
+) -> None:
+    """Rank the new rows for every channel entitled to see them.
+
+    A row from a channel-scoped source is ranked only by that channel. A row from a
+    shared source is ranked by each of the owner's channels, separately, so a kids
+    channel and a technology channel reading the same feed reach their own verdicts.
+    """
+    from nexora.services.trends import relevance as relevance_service
+
+    channel_rows = [row for row in rows if row.channel_id is not None]
+    shared_rows = [row for row in rows if row.channel_id is None]
+
+    if channel_rows:
+        relevance_service.recompute_for_channel(session, scanning_channel, channel_rows)
+
+    if shared_rows:
+        siblings = list(
+            session.execute(
+                select(Channel).where(
+                    Channel.user_id == scanning_channel.user_id, Channel.is_active.is_(True)
+                )
+            ).scalars()
+        )
+        for sibling in siblings:
+            relevance_service.recompute_for_channel(session, sibling, shared_rows)
 
 
 def freshness_of(row: TrendingTopic, *, now: datetime | None = None) -> dict[str, Any]:

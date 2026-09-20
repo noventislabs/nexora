@@ -86,8 +86,8 @@ def candidate(db: Session, channel: Channel) -> TopicCandidate:
             category="technology",
             discovered_at=now - timedelta(hours=index),
             published_at=now - timedelta(hours=index + 1),
-            opportunity_score=70,
-            score_breakdown={"score": 70, "competition_level": "low", "components": []},
+            signal_score=70,
+            signal_breakdown={"score": 70, "competition_level": "low", "components": []},
         )
         db.add(row)
         rows.append(row)

@@ -80,6 +80,9 @@ class Channel(Base, TimestampMixin):
     youtube_connection: Mapped[YouTubeConnection | None] = relationship(
         back_populates="channel", cascade="all, delete-orphan", uselist=False
     )
+    profile = relationship(
+        "ChannelProfile", back_populates="channel", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class ChannelSettings(Base, TimestampMixin):

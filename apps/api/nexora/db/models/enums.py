@@ -141,3 +141,46 @@ class ComponentStatus(StrEnum):
     CONNECTED = "CONNECTED"
     NOT_CONNECTED = "NOT CONNECTED"
     NOT_CONFIGURED = "NOT CONFIGURED"
+
+
+class AudienceClassification(StrEnum):
+    """Who a channel is for.
+
+    Deliberately separate from ``made_for_kids``: this is NEXORA's editorial notion of
+    the audience, while ``made_for_kids`` is a legal declaration YouTube requires. A
+    channel may be classified KIDS here and still need its made-for-kids declaration
+    set explicitly — one is never inferred from the other.
+    """
+
+    KIDS = "kids"
+    FAMILY = "family"
+    TEEN = "teen"
+    GENERAL = "general"
+    MATURE = "mature"
+
+
+class RelevanceStatus(StrEnum):
+    """Result of matching one trend against one channel.
+
+    ``INSUFFICIENT_DATA`` is a first-class outcome, not an error: a channel with no
+    categories, no preferred topics and no description gives nothing to match against,
+    and saying so is more honest than returning a low number.
+    """
+
+    RELEVANT = "RELEVANT"
+    LOW_RELEVANCE = "LOW_RELEVANCE"
+    EXCLUDED = "EXCLUDED"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+
+
+class ScoreStatus(StrEnum):
+    SCORED = "SCORED"
+    INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+    EXCLUDED = "EXCLUDED"
+
+
+class SourceScope(StrEnum):
+    """Whether a trend source feeds one channel or every channel a user owns."""
+
+    CHANNEL = "channel"
+    SHARED = "shared"

@@ -65,12 +65,24 @@ def evidence(db: Session, channel: Channel) -> list[TrendingTopic]:
             category="technology",
             discovered_at=now - timedelta(hours=index),
             published_at=now - timedelta(hours=index + 1),
-            opportunity_score=80 - index * 10,
-            score_breakdown={"score": 80 - index * 10, "competition_level": "low", "components": []},
+            user_id=channel.user_id,
+            signal_score=80 - index * 10,
+            signal_breakdown={
+                "score": 80 - index * 10,
+                "competition_level": "low",
+                "components": [],
+            },
             scored_at=now,
         )
         db.add(row)
         rows.append(row)
+    db.flush()
+
+    # Evidence is selected and scored per channel, so the relevance rows are part of
+    # the fixture's world rather than an optional extra.
+    from nexora.services.trends import relevance as relevance_service
+
+    relevance_service.recompute_for_channel(db, channel, rows)
     db.commit()
     return rows
 
@@ -168,8 +180,13 @@ def test_score_is_inherited_from_evidence_never_asked_of_the_model(
     result = generate_candidates(db, channel, count=1)
     candidate = result.candidates[0]
 
-    # Evidence 1 scores 70 and evidence 2 scores 60 — the best cited item wins.
-    assert candidate.opportunity_score == 70
+    # The best cited item wins, and the score inherited is *this channel's* score for
+    # it — signal combined with relevance — not the trend row's channel-independent
+    # signal and certainly not the 99 the model tried to supply.
+    from nexora.services.topics import channel_score
+
+    cited_scores = [channel_score(db, channel.id, evidence[i].id).score for i in (1, 2)]
+    assert candidate.opportunity_score == max(cited_scores)
     assert candidate.score_breakdown["derived_from"]["cited_items_scored"] == 2
     assert "never asked to produce a score" in candidate.score_breakdown["derived_from"]["rule"]
     assert 99 not in (candidate.score_breakdown or {}).values()
@@ -225,9 +242,14 @@ def test_a_category_the_channel_does_not_have_is_not_accepted(
 def test_unscored_evidence_yields_an_unavailable_score(
     db: Session, channel: Channel, evidence, llm
 ) -> None:
+    from nexora.services.trends import relevance as relevance_service
+
     for row in evidence:
-        row.opportunity_score = None
-        row.score_breakdown = None
+        row.signal_score = None
+        row.signal_breakdown = None
+    db.flush()
+    # Re-rank: with no signal to combine, this channel's score becomes unavailable.
+    relevance_service.recompute_for_channel(db, channel, evidence)
     db.commit()
 
     respx.post(ANTHROPIC_URL).mock(
@@ -371,12 +393,18 @@ def test_openai_adapter_is_interchangeable(
 def test_select_evidence_excludes_duplicates(db: Session, channel: Channel, evidence) -> None:
     evidence[2].duplicate_of_id = evidence[0].id
     db.commit()
-    selected = select_evidence(db, channel.id)
+    selected = select_evidence(db, channel)
     assert evidence[2] not in selected
     assert len(selected) == 2
 
 
-def test_select_evidence_orders_by_score(db: Session, channel: Channel, evidence) -> None:
-    selected = select_evidence(db, channel.id)
-    scores = [row.opportunity_score for row in selected]
+def test_select_evidence_orders_by_this_channels_score(
+    db: Session, channel: Channel, evidence
+) -> None:
+    """Ordering comes from the channel's relevance rows, not the trend's own signal."""
+    from nexora.services.topics import channel_score
+
+    selected = select_evidence(db, channel)
+    scores = [channel_score(db, channel.id, row.id).score for row in selected]
+    assert all(score is not None for score in scores)
     assert scores == sorted(scores, reverse=True)

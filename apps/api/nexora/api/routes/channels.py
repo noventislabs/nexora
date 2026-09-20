@@ -147,7 +147,9 @@ def update_channel(
     if payload.timezone is not None:
         channel.timezone = channel_service.validate_timezone(payload.timezone)
     if payload.categories is not None:
-        channel.categories = channel_service.validate_categories(payload.categories)
+        channel.categories = channel_service.validate_categories(
+            db, payload.categories, channel_id=channel.id
+        )
     db.flush()
 
     audit.record(

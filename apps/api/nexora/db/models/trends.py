@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from nexora.db.base import Base, TimestampMixin, utc_column, uuid_pk
-from nexora.db.models.enums import CandidateStatus
+from nexora.db.models.enums import CandidateStatus, SourceScope
 
 
 class TrendSource(Base, TimestampMixin):
@@ -19,9 +19,16 @@ class TrendSource(Base, TimestampMixin):
     __tablename__ = "trend_sources"
 
     id: Mapped[uuid.UUID] = uuid_pk()
+    #: Set for a channel-scoped source; NULL for one shared across a user's channels.
     channel_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("channels.id", ondelete="CASCADE"), index=True
     )
+    #: Owner of a shared source. Ingestion happens once and every channel the user
+    #: owns ranks the result for itself, rather than each channel re-crawling the feed.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    scope: Mapped[str] = mapped_column(String(16), nullable=False, default=SourceScope.CHANNEL.value)
     kind: Mapped[str] = mapped_column(String(48), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
@@ -58,8 +65,14 @@ class TrendingTopic(Base):
     source_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("trend_sources.id", ondelete="CASCADE"), index=True
     )
+    #: Set when the row came from a channel-scoped source. NULL for a shared row,
+    #: which belongs to ``user_id`` and is ranked separately by each of that user's
+    #: channels through :class:`ChannelTopicRelevance`.
     channel_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("channels.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     source_kind: Mapped[str] = mapped_column(String(48), nullable=False)
     source_name: Mapped[str] = mapped_column(String(160), nullable=False)
@@ -90,15 +103,21 @@ class TrendingTopic(Base):
     engagement: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     raw: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 
-    opportunity_score: Mapped[int | None] = mapped_column(Integer, index=True)
-    score_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    #: The **channel-independent** part of the score: velocity, competition, content
+    #: availability, recency, evergreen shape and source reliability. Audience
+    #: relevance is deliberately absent, because it is a property of a (trend,
+    #: channel) pair and lives on :class:`ChannelTopicRelevance` instead. Naming this
+    #: ``opportunity_score`` would be a lie once one row serves several channels.
+    signal_score: Mapped[int | None] = mapped_column(Integer, index=True)
+    signal_breakdown: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     scored_at = utc_column()
 
     __table_args__ = (
         UniqueConstraint("source_id", "dedupe_hash", name="uq_trending_topics_source_dedupe"),
         Index("ix_trending_topics_channel_discovered", "channel_id", "discovered_at"),
         Index("ix_trending_topics_channel_content", "channel_id", "content_hash"),
-        Index("ix_trending_topics_channel_score", "channel_id", "opportunity_score"),
+        Index("ix_trending_topics_channel_score", "channel_id", "signal_score"),
+        Index("ix_trending_topics_user_discovered", "user_id", "discovered_at"),
         Index("ix_trending_topics_source_kind", "source_kind"),
     )
 

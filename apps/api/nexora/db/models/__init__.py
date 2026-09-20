@@ -1,6 +1,11 @@
 """SQLAlchemy models. Importing this package registers every table on ``Base.metadata``."""
 
 from nexora.db.base import Base
+from nexora.db.models.audience import (
+    ChannelProfile,
+    ChannelTopicRelevance,
+    ContentCategory,
+)
 from nexora.db.models.content import (
     ContentProject,
     ContentScript,
@@ -38,6 +43,9 @@ from nexora.db.models.trends import (
 
 __all__ = [
     "AnalyticsSnapshot",
+    "ChannelProfile",
+    "ChannelTopicRelevance",
+    "ContentCategory",
     "AuditLog",
     "AuthSession",
     "AutomationRun",

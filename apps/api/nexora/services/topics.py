@@ -25,8 +25,13 @@ from sqlalchemy.orm import Session
 
 from nexora.core.errors import NotFound, ProviderUnavailable, ValidationError
 from nexora.core.logging import get_logger
-from nexora.db.models import Channel, TopicCandidate, TrendingTopic
-from nexora.db.models.enums import ActorType, CandidateStatus
+from nexora.db.models import (
+    Channel,
+    ChannelTopicRelevance,
+    TopicCandidate,
+    TrendingTopic,
+)
+from nexora.db.models.enums import ActorType, CandidateStatus, RelevanceStatus
 from nexora.services import audit
 from nexora.services.providers.llm import LLMMessage, get_llm
 
@@ -41,8 +46,13 @@ SYSTEM_PROMPT = """You are an editorial researcher for a YouTube channel.
 You are given TREND ITEMS that were actually collected from the channel's configured \
 sources. Propose video topics that are supported by those items.
 
+You are also given the CHANNEL's own profile: its audience, categories, brand voice and the topics it refuses to cover. The same trend items are shown to channels with very different audiences, so a topic that suits one channel may be wrong for this one.
+
 Hard rules:
 - Ground every topic in the supplied items. Cite them by their numeric index.
+- Write for THIS channel's stated audience. If an item cannot be turned into something appropriate for that audience, skip it rather than forcing it.
+- Never propose a topic touching anything in the channel's "must_not_cover" list.
+- Do not assume facts about the audience beyond what the profile states. If the profile is thin, propose fewer topics rather than inventing a viewer persona.
 - Never invent a fact, statistic, quotation, date or source that is not in the items.
 - If the items do not support a topic, propose fewer topics. Returning fewer good \
 topics is correct; padding the list is not.
@@ -90,28 +100,62 @@ class GenerationResult:
 
 def select_evidence(
     session: Session,
-    channel_id: uuid.UUID,
+    channel: Channel,
     *,
     limit: int = 25,
     min_score: int | None = None,
     trend_ids: list[uuid.UUID] | None = None,
 ) -> list[TrendingTopic]:
-    """The scored, non-duplicate trend rows a generation run will reason over."""
-    stmt = select(TrendingTopic).where(
-        TrendingTopic.channel_id == channel_id,
-        TrendingTopic.duplicate_of_id.is_(None),
+    """The trend rows a generation run will reason over, ranked **for this channel**.
+
+    Two rules matter here:
+
+    * Evidence is ordered by this channel's relevance score, not by the trend row's
+      channel-independent signal. A story that is big everywhere but irrelevant to
+      this channel should not be the material a script is built from.
+    * A row this channel has excluded is never passed to the model. Offering the
+      operator's forbidden topic as evidence, even at the bottom of the list, would
+      quietly ignore a rule they set.
+    """
+    visible = (TrendingTopic.channel_id == channel.id) | (
+        TrendingTopic.channel_id.is_(None) & (TrendingTopic.user_id == channel.user_id)
+    )
+    stmt = (
+        select(TrendingTopic, ChannelTopicRelevance)
+        .outerjoin(
+            ChannelTopicRelevance,
+            (ChannelTopicRelevance.trending_topic_id == TrendingTopic.id)
+            & (ChannelTopicRelevance.channel_id == channel.id),
+        )
+        .where(
+            visible,
+            TrendingTopic.duplicate_of_id.is_(None),
+            ChannelTopicRelevance.status.is_distinct_from(RelevanceStatus.EXCLUDED.value),
+        )
     )
     if trend_ids:
         stmt = stmt.where(TrendingTopic.id.in_(trend_ids))
     else:
         stmt = stmt.where(TrendingTopic.discovered_at >= datetime.now(UTC) - EVIDENCE_LOOKBACK)
         if min_score is not None:
-            stmt = stmt.where(TrendingTopic.opportunity_score >= min_score)
+            stmt = stmt.where(ChannelTopicRelevance.score >= min_score)
     stmt = stmt.order_by(
-        TrendingTopic.opportunity_score.desc().nullslast(),
+        ChannelTopicRelevance.score.desc().nullslast(),
+        TrendingTopic.signal_score.desc().nullslast(),
         TrendingTopic.discovered_at.desc(),
     ).limit(limit)
-    return list(session.execute(stmt).scalars())
+    return [row for row, _ in session.execute(stmt).all()]
+
+
+def channel_score(
+    session: Session, channel_id: uuid.UUID, topic_id: uuid.UUID
+) -> ChannelTopicRelevance | None:
+    return session.execute(
+        select(ChannelTopicRelevance).where(
+            ChannelTopicRelevance.channel_id == channel_id,
+            ChannelTopicRelevance.trending_topic_id == topic_id,
+        )
+    ).scalar_one_or_none()
 
 
 def generate_candidates(
@@ -127,14 +171,26 @@ def generate_candidates(
     if not 1 <= count <= MAX_CANDIDATES:
         raise ValidationError(f"Requested candidate count must be between 1 and {MAX_CANDIDATES}.")
 
-    evidence = select_evidence(session, channel.id, min_score=min_score, trend_ids=trend_ids)
+    evidence = select_evidence(session, channel, min_score=min_score, trend_ids=trend_ids)
     if not evidence:
         raise NotFound(
             "There are no collected trend items to build topics from. Run a trend scan first."
         )
 
     provider = get_llm()  # raises ProviderNotConfigured when unset
-    prompt = _build_prompt(channel, evidence, count)
+    from nexora.services.profiles import get_profile
+
+    profile = get_profile(session, channel.id)
+    relevance = {
+        record.trending_topic_id: record
+        for record in session.execute(
+            select(ChannelTopicRelevance).where(
+                ChannelTopicRelevance.channel_id == channel.id,
+                ChannelTopicRelevance.trending_topic_id.in_([row.id for row in evidence]),
+            )
+        ).scalars()
+    }
+    prompt = _build_prompt(channel, evidence, count, profile=profile, relevance=relevance)
     response = provider.complete(
         system=SYSTEM_PROMPT,
         messages=[LLMMessage(role="user", content=prompt)],
@@ -195,7 +251,14 @@ def generate_candidates(
     )
 
 
-def _build_prompt(channel: Channel, evidence: list[TrendingTopic], count: int) -> str:
+def _build_prompt(
+    channel: Channel,
+    evidence: list[TrendingTopic],
+    count: int,
+    *,
+    profile: Any = None,
+    relevance: dict[uuid.UUID, ChannelTopicRelevance] | None = None,
+) -> str:
     items = []
     for index, row in enumerate(evidence):
         item: dict[str, Any] = {
@@ -214,14 +277,49 @@ def _build_prompt(channel: Channel, evidence: list[TrendingTopic], count: int) -
             item["engagement"] = row.engagement
         if row.category:
             item["category"] = row.category
+        record = (relevance or {}).get(row.id)
+        if record is not None:
+            # Why *this channel* was shown this item, so the model proposes topics that
+            # fit the channel rather than topics that merely fit the news.
+            item["relevance_to_this_channel"] = {
+                "status": record.status,
+                "matched_categories": [
+                    entry.get("category") for entry in (record.matched_categories or [])
+                ],
+                "matched_preferences": [
+                    entry.get("preference") for entry in (record.matched_preferences or [])
+                ],
+            }
         items.append(item)
 
+    channel_context: dict[str, Any] = {
+        "name": channel.name,
+        "description": channel.description,
+        "primary_categories": list(channel.categories or []),
+        "primary_language": channel.primary_language,
+    }
+    if profile is not None:
+        # The channel's own configuration, so a kids channel and a finance channel get
+        # visibly different instructions from the same evidence pool.
+        channel_context.update(
+            {
+                "audience_description": profile.audience_description,
+                "audience_classification": profile.audience_classification,
+                "secondary_categories": list(profile.secondary_categories or []),
+                "brand_voice": profile.brand_voice,
+                "preferred_topics": list(profile.preferred_topics or []),
+                "must_not_cover": sorted(
+                    set(profile.blocked_topics or [])
+                    | set(profile.content_exclusions or [])
+                    | set(profile.sensitive_content_restrictions or [])
+                ),
+                "short_form_enabled": profile.short_form_enabled,
+                "long_form_enabled": profile.long_form_enabled,
+            }
+        )
+
     context = {
-        "channel": {
-            "name": channel.name,
-            "categories": list(channel.categories or []),
-            "primary_language": channel.primary_language,
-        },
+        "channel": channel_context,
         "requested_candidates": count,
         "trend_items": items,
     }
@@ -258,7 +356,7 @@ def _materialize(
         dropped.append(f"Candidate '{title[:60]}' cited no resolvable trend item.")
         return None
 
-    inherited = _inherit_score(cited)
+    inherited = _inherit_score(session, channel.id, cited)
     published = [row.published_at for row in cited if row.published_at]
     discovered = [row.discovered_at for row in cited if row.discovered_at]
     timestamps = published or discovered
@@ -325,13 +423,32 @@ def _validated_category(value: Any, channel: Channel, cited: list[TrendingTopic]
     return categories[0] if categories else None
 
 
-def _inherit_score(cited: list[TrendingTopic]) -> dict[str, Any]:
+def _inherit_score(
+    session: Session, channel_id: uuid.UUID, cited: list[TrendingTopic]
+) -> dict[str, Any]:
     """Derive the candidate's score from its evidence rather than asking the model.
 
-    Uses the best-scoring cited item: a topic is as workable as its strongest support.
-    When no cited item could be scored, the candidate's score is unavailable too.
+    The score inherited is this **channel's** Opportunity Score for the cited item,
+    read from its relevance row — not the trend's channel-independent signal. A topic
+    is as workable as its strongest support *for the channel that would publish it*.
+
+    When no cited item has been ranked for this channel, the candidate's score is
+    unavailable too, and says so.
     """
-    scored = [row for row in cited if row.opportunity_score is not None]
+    relevances = {
+        record.trending_topic_id: record
+        for record in session.execute(
+            select(ChannelTopicRelevance).where(
+                ChannelTopicRelevance.channel_id == channel_id,
+                ChannelTopicRelevance.trending_topic_id.in_([row.id for row in cited]),
+            )
+        ).scalars()
+    }
+    scored = [
+        (row, relevances[row.id])
+        for row in cited
+        if row.id in relevances and relevances[row.id].score is not None
+    ]
     if not scored:
         return {
             "score": None,
@@ -340,27 +457,34 @@ def _inherit_score(cited: list[TrendingTopic]) -> dict[str, Any]:
                 "score": None,
                 "available": False,
                 "unavailable_reason": (
-                    "None of the cited trend items could be scored, so this candidate has "
-                    "no Opportunity Score."
+                    "None of the cited trend items has been ranked for this channel, so "
+                    "this candidate has no Opportunity Score."
                 ),
                 "derived_from": [str(row.id) for row in cited],
             },
         }
 
-    best = max(scored, key=lambda row: row.opportunity_score or 0)
-    breakdown = dict(best.score_breakdown or {})
-    breakdown["derived_from"] = {
-        "trending_topic_id": str(best.id),
-        "title": best.title,
-        "rule": (
-            "Inherited from the highest-scoring cited trend item. The model is never "
-            "asked to produce a score."
-        ),
-        "cited_items_scored": len(scored),
-        "cited_items_total": len(cited),
+    best_row, best_relevance = max(scored, key=lambda pair: pair[1].score or 0)
+    signal = dict(best_row.signal_breakdown or {})
+    breakdown = {
+        **(best_relevance.score_breakdown or {}),
+        "signal_components": signal.get("components", []),
+        "competition_level": signal.get("competition_level", "unknown"),
+        "relevance_status": best_relevance.status,
+        "matched_categories": list(best_relevance.matched_categories or []),
+        "derived_from": {
+            "trending_topic_id": str(best_row.id),
+            "title": best_row.title,
+            "rule": (
+                "Inherited from the cited trend item this channel ranked highest. The "
+                "model is never asked to produce a score."
+            ),
+            "cited_items_scored": len(scored),
+            "cited_items_total": len(cited),
+        },
     }
     return {
-        "score": best.opportunity_score,
+        "score": best_relevance.score,
         "competition_level": breakdown.get("competition_level", "unknown"),
         "breakdown": breakdown,
     }

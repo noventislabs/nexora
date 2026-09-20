@@ -99,9 +99,9 @@ def test_scan_over_a_real_socket_persists_and_scores(
     # Scoring ran for real: every row carries a breakdown that explains itself.
     for row in rows:
         assert row.scored_at is not None
-        assert row.score_breakdown is not None
-        assert row.score_breakdown["method"]
-        components = {c["key"]: c for c in row.score_breakdown["components"]}
+        assert row.signal_breakdown is not None
+        assert row.signal_breakdown["method"]
+        components = {c["key"]: c for c in row.signal_breakdown["components"]}
         # RSS publishes no engagement, so velocity must be unavailable, not zero.
         assert components["trend_velocity"]["available"] is False
         assert components["trend_velocity"]["value"] is None

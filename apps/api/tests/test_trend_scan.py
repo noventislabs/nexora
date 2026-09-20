@@ -129,7 +129,7 @@ def test_scan_persists_normalized_items(db: Session, channel: Channel) -> None:
     assert row.duplicate_of_id is None
     assert row.corroboration_count == 1
     assert row.engagement == {}, "RSS reports no engagement; the map stays empty"
-    assert row.opportunity_score is not None or row.score_breakdown["available"] is False
+    assert row.signal_score is not None or row.signal_breakdown["available"] is False
 
 
 @respx.mock
