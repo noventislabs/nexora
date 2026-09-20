@@ -65,6 +65,10 @@ class ChannelSettingsRequest(ApiModel):
     subtitle_burn_in: bool | None = None
     preferred_voice_id: str | None = Field(default=None, max_length=128)
     editorial_notes: str | None = Field(default=None, max_length=4000)
+    #: Tri-state. ``None`` means undecided, which blocks publishing rather than
+    #: defaulting to either answer — the declaration carries legal weight.
+    made_for_kids_default: bool | None = None
+    youtube_category_id: str | None = Field(default=None, max_length=16)
 
 
 class AutomationSettingsRequest(ApiModel):

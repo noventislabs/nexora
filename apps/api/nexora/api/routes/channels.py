@@ -37,6 +37,8 @@ def _settings_dict(record: Any) -> dict[str, Any]:
         "subtitle_burn_in": record.subtitle_burn_in,
         "preferred_voice_id": record.preferred_voice_id,
         "editorial_notes": record.editorial_notes,
+        "made_for_kids_default": record.made_for_kids_default,
+        "youtube_category_id": record.youtube_category_id,
     }
 
 
