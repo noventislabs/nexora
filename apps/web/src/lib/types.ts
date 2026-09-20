@@ -70,6 +70,12 @@ export type Channel = {
 
 export type AutomationSettings = {
   mode: "assisted" | "semi_autonomous" | "autonomous";
+  /** Master switch for producing content unattended. OFF for a new channel. */
+  automation_enabled: boolean;
+  /** Master switch for publishing at all, automated or manual. */
+  publishing_enabled: boolean;
+  /** The single documented exception to the fact-check publish gate. */
+  allow_unverified_commentary: boolean;
   autopilot_enabled: boolean;
   auto_publish_enabled: boolean;
   require_human_approval: boolean;
@@ -927,4 +933,95 @@ export type VideoWithMetrics = {
   published_at: string | null;
   metrics: Record<string, number | null>;
   has_metrics: boolean;
+};
+
+
+// ----------------------------------------------------- Phase 7: autonomous runs
+
+export type KillSwitchState = {
+  engaged: boolean;
+  reason: string | null;
+  engaged_at: string | null;
+  engaged_by: string | null;
+  scope: "global";
+  note: string;
+  cancelled_jobs?: number;
+};
+
+export type GateResult = {
+  allowed: boolean;
+  blockers: { scope: string; detail: string }[];
+  warnings: { scope: string; detail: string }[];
+};
+
+export type LevelCapabilities = {
+  discover: boolean;
+  research: boolean;
+  write: boolean;
+  produce: boolean;
+  run_checks: boolean;
+  publish: boolean;
+};
+
+export type AutomationState = {
+  channel_id: string;
+  mode: AutomationSettings["mode"];
+  level_capabilities: LevelCapabilities;
+  switches: {
+    automation_enabled: boolean;
+    publishing_enabled: boolean;
+    autopilot_enabled: boolean;
+    auto_publish_enabled: boolean;
+    require_human_approval: boolean;
+    emergency_stop: boolean;
+  };
+  global_emergency_stop: KillSwitchState;
+  can_produce: GateResult;
+  can_publish_autonomously: GateResult;
+  daily: {
+    published_today: number;
+    scheduled_today: number;
+    failed_today: number;
+    day: string;
+    timezone: string;
+    counting_rule: string;
+  };
+  limits: {
+    max_videos_per_day: number;
+    max_videos_per_week: number;
+    min_interval_minutes: number;
+  };
+  active_locks: {
+    lock_key: string;
+    holder: string | null;
+    acquired_at: string | null;
+    expires_at: string | null;
+  }[];
+  levels: Record<AutomationSettings["mode"], LevelCapabilities>;
+  note: string;
+};
+
+export type AutomationStage = {
+  stage: string;
+  status: "COMPLETED" | "STOPPED" | "SKIPPED" | "FAILED";
+  detail: string;
+  data: Record<string, unknown>;
+  at: string;
+};
+
+export type AutomationRun = {
+  id: string;
+  channel_id: string;
+  content_project_id: string | null;
+  mode: string;
+  trigger: string;
+  status: "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
+  current_stage: string | null;
+  stages: AutomationStage[];
+  stopped_reason: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string | null;
+  pipeline: string[];
 };

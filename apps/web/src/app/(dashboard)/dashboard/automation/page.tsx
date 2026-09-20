@@ -11,7 +11,21 @@ import {
   Loading,
   StatusPill,
 } from "@/components/primitives";
-import type { AutomationSettings, Channel, Paged } from "@/lib/types";
+import {
+  DailyCounts,
+  GatePanel,
+  KillSwitchBanner,
+  LevelTable,
+  RunTimeline,
+} from "@/components/autopilot";
+import type {
+  AutomationRun,
+  AutomationSettings,
+  AutomationState,
+  Channel,
+  KillSwitchState,
+  Paged,
+} from "@/lib/types";
 
 const MODES = [
   {
@@ -60,9 +74,12 @@ export default function AutomationPage() {
       <header>
         <h1 className="text-lg font-semibold text-base-100">Automation</h1>
         <p className="mt-0.5 text-sm text-base-400">
-          The kill switch, publishing limits and safety thresholds for this channel.
+          The kill switches, autopilot level, publishing limits and safety thresholds.
+          Every one of these is enforced on the server before any job runs.
         </p>
       </header>
+
+      <GlobalKillSwitch />
 
       {channels.data.items.length > 1 && (
         <select
@@ -78,7 +95,9 @@ export default function AutomationPage() {
         </select>
       )}
 
+      {channelId && <AutopilotPanel channelId={channelId} />}
       {channelId && <AutomationPanel channelId={channelId} />}
+      {channelId && <RunHistory channelId={channelId} />}
     </div>
   );
 }
@@ -413,5 +432,217 @@ function NumberField({
         className="w-full rounded-lg border border-base-600 bg-base-850 px-3 py-2 font-mono text-sm text-base-100 outline-none focus:border-accent-600"
       />
     </label>
+  );
+}
+
+
+/**
+ * The global stop.
+ *
+ * Engaging it needs a reason, because an operator reading the audit log next week
+ * needs to know why the system halted, and "someone pressed the button" is not an
+ * answer.
+ */
+function GlobalKillSwitch() {
+  const state = useApi<KillSwitchState>("/api/automation/emergency-stop");
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function engage(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await apiFetch<KillSwitchState>("/api/automation/emergency-stop", {
+        method: "POST",
+        body: { reason },
+      });
+      setNotice(
+        `Stopped. ${result.cancelled_jobs ?? 0} queued job(s) were cancelled.`,
+      );
+      setReason("");
+      state.refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not engage the stop.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function release() {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch("/api/automation/emergency-stop", { method: "DELETE" });
+      setNotice(
+        "Released. No channel's settings were changed — anything that was off is still off.",
+      );
+      state.refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not release the stop.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (state.status !== "ready") return null;
+
+  return (
+    <div className="space-y-3">
+      <KillSwitchBanner state={state.data} />
+      {error && <ErrorNotice message={error} />}
+      {notice && (
+        <div className="rounded-lg border border-ok-500/30 bg-ok-500/10 px-4 py-3 text-sm text-ok-500">
+          {notice}
+        </div>
+      )}
+
+      <Card title="Global emergency stop">
+        {state.data.engaged ? (
+          <>
+            <p className="text-sm text-base-300">
+              Every channel of every user is halted. Releasing this turns nothing back
+              on — each channel keeps the settings it had.
+            </p>
+            <div className="mt-3">
+              <Button onClick={release} disabled={busy}>
+                {busy ? "Releasing…" : "Release the stop"}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-base-400">
+              Halts content production and publishing across every channel immediately,
+              and cancels queued upload jobs.
+            </p>
+            <form onSubmit={engage} className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="block flex-1">
+                <span className="mb-1.5 block text-xs text-base-400">
+                  Why are you stopping? (recorded in the audit log)
+                </span>
+                <input
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  aria-label="Emergency stop reason"
+                  placeholder="e.g. Upstream provider incident"
+                  className="w-full rounded-lg border border-base-600 bg-base-850 px-3 py-2 text-sm text-base-100 outline-none focus:border-accent-600"
+                />
+              </label>
+              <Button type="submit" variant="danger" disabled={busy || reason.trim().length < 3}>
+                Stop everything
+              </Button>
+            </form>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/** What this channel's autopilot may do right now, and why. */
+function AutopilotPanel({ channelId }: { channelId: string }) {
+  const state = useApi<AutomationState>(`/api/automation/state?channel_id=${channelId}`, [
+    channelId,
+  ]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await apiFetch<AutomationRun>("/api/automation/run", {
+        method: "POST",
+        body: { channel_id: channelId, background: true },
+      });
+      setNotice(`Run ${result.id.slice(0, 8)} queued.`);
+      state.refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not start a run.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (state.status === "loading") return <Loading label="Loading autopilot state" />;
+  if (state.status === "error") return <ErrorNotice message={state.error.message} />;
+
+  const data = state.data;
+
+  return (
+    <div className="space-y-4">
+      {error && <ErrorNotice message={error} />}
+      {notice && (
+        <div className="rounded-lg border border-ok-500/30 bg-ok-500/10 px-4 py-3 text-sm text-ok-500">
+          {notice}
+        </div>
+      )}
+
+      <Card
+        title="Autopilot"
+        action={
+          <Button
+            variant="primary"
+            onClick={run}
+            disabled={busy || !data.can_produce.allowed}
+          >
+            {busy ? "Starting…" : "Run once now"}
+          </Button>
+        }
+      >
+        <div className="grid gap-3 lg:grid-cols-2">
+          <GatePanel title="Produce content" gate={data.can_produce} />
+          <GatePanel title="Publish without a person" gate={data.can_publish_autonomously} />
+        </div>
+
+        {data.active_locks[0] && (
+          <p data-testid="active-lock" className="mt-3 text-xs text-base-400">
+            A run is in progress ({data.active_locks[0].lock_key}), held by{" "}
+            {data.active_locks[0].holder ?? "an unknown worker"}.
+          </p>
+        )}
+
+        <p className="mt-3 text-[11px] text-base-500">{data.note}</p>
+      </Card>
+
+      <Card title="What each level may do unattended">
+        <LevelTable state={data} />
+      </Card>
+
+      <Card title="Today">
+        <DailyCounts state={data} />
+      </Card>
+    </div>
+  );
+}
+
+function RunHistory({ channelId }: { channelId: string }) {
+  const runs = useApi<{ items: AutomationRun[]; total: number }>(
+    `/api/automation/runs?channel_id=${channelId}&limit=5`,
+    [channelId],
+  );
+
+  if (runs.status !== "ready") return null;
+  if (runs.data.total === 0) {
+    return (
+      <Card title="Runs">
+        <p className="text-sm text-base-400">
+          This channel has not run the pipeline yet.
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {runs.data.items.map((run) => (
+        <RunTimeline key={run.id} run={run} />
+      ))}
+    </div>
   );
 }
