@@ -584,3 +584,165 @@ export type ProjectThumbnail = {
   size_bytes?: number | null;
   mime_type?: string | null;
 };
+
+// ------------------------------------------------------------------ Phase 5: YouTube
+
+/**
+ * What an established connection can actually do.
+ *
+ * These are four separate permissions, not one. Identifying a channel publicly grants
+ * `public_read` and nothing else — in particular it never grants `upload`.
+ */
+export type YouTubeCapabilities = {
+  upload: boolean;
+  channel_analytics: boolean;
+  revenue: boolean;
+  public_read: boolean;
+};
+
+export type YouTubeConnection = {
+  status: "not_connected" | "connected" | "revoked" | "error";
+  connected: boolean;
+  youtube_channel_id: string | null;
+  youtube_channel_title: string | null;
+  youtube_custom_url: string | null;
+  scopes: string[];
+  has_analytics_scope: boolean;
+  has_monetary_scope: boolean;
+  connected_at: string | null;
+  last_refreshed_at: string | null;
+  token_expires_at: string | null;
+  last_error: string | null;
+  public_channel_id: string | null;
+  public_channel_title: string | null;
+  public_verified_at: string | null;
+  capabilities: Partial<YouTubeCapabilities>;
+};
+
+export type YouTubeConnectionState = YouTubeConnection & {
+  /** Whether this deployment has OAuth client credentials at all. */
+  oauth_app: Availability;
+  /** Whether this deployment has a server API key for public reads. */
+  data_api_key: Availability;
+  note: string;
+};
+
+export type PublicChannel = {
+  channel_id: string;
+  title: string;
+  custom_url: string | null;
+  description: string | null;
+  published_at: string | null;
+  country: string | null;
+  /** `null` when the owner hides it. Never rendered as 0. */
+  subscriber_count: number | null;
+  subscriber_count_hidden: boolean;
+  view_count: number | null;
+  video_count: number | null;
+  thumbnail_url: string | null;
+  source: string;
+  scope_note: string;
+};
+
+export type PublicChannelStatus = {
+  linked: boolean;
+  channel_id: string | null;
+  title: string | null;
+  verified_at: string | null;
+  note: string;
+};
+
+export type YouTubeVideo = {
+  id: string;
+  youtube_video_id: string;
+  url: string;
+  title: string | null;
+  privacy_status: string | null;
+  upload_status: string | null;
+  published_at: string | null;
+  duration_seconds: number | null;
+  thumbnail_url: string | null;
+  last_synced_at: string | null;
+  content_project_id: string | null;
+};
+
+export type MetadataVersion = {
+  id: string;
+  version: number;
+  title: string;
+  title_length: number;
+  description: string;
+  description_length: number;
+  tags: string[];
+  tags_total_chars: number;
+  category_id: string | null;
+  default_language: string | null;
+  made_for_kids: boolean | null;
+  provider: string | null;
+  model: string | null;
+  created_at: string | null;
+  limits: { title: number; description: number; tags_total_chars: number };
+};
+
+/** One publishing gate and whether it currently allows publishing. */
+export type PreflightGate = {
+  key: string;
+  label: string;
+  passed: boolean;
+  blocking: boolean;
+  detail: string;
+};
+
+export type QualityCheck = {
+  id: string;
+  kind: string;
+  status: "PASS" | "WARN" | "FAIL" | "UNKNOWN";
+  score: number | null;
+  checks: PreflightGate[];
+  details: Record<string, unknown>;
+  created_at: string | null;
+  blocks_publishing: boolean;
+};
+
+export type CopyrightCheck = {
+  id: string;
+  status: "PASS" | "WARN" | "FAIL" | "UNKNOWN";
+  risk_level: string;
+  unknown_license_count: number;
+  prohibited_count: number;
+  findings: { label: string; detail: string; severity?: string }[];
+  created_at: string | null;
+  blocks_publishing: boolean;
+};
+
+export type Preflight = {
+  can_publish: boolean;
+  gates: PreflightGate[];
+  blockers: string[];
+  warnings: string[];
+  quality: QualityCheck | null;
+  copyright: CopyrightCheck | null;
+};
+
+export type PublishJob = {
+  id: string;
+  content_project_id: string;
+  status: string;
+  privacy_status: string;
+  scheduled_for: string | null;
+  authorized_by: string;
+  approved_at: string | null;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: string | null;
+  permanent_failure: boolean;
+  last_error: string | null;
+  youtube_video_id: string | null;
+  youtube_url: string | null;
+  upload_bytes: number | null;
+  verified_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  preflight: Record<string, unknown>;
+  created_at: string | null;
+};

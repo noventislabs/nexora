@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useApi } from "@/components/use-api";
 import {
@@ -11,6 +12,7 @@ import {
   Loading,
   StatusPill,
 } from "@/components/primitives";
+import { YouTubeConnectionCard } from "@/components/youtube-connection";
 import type { Channel, Paged } from "@/lib/types";
 
 const CATEGORIES = [
@@ -24,14 +26,60 @@ const CATEGORIES = [
 ] as const;
 
 export default function ChannelsPage() {
+  return (
+    <Suspense fallback={<Loading label="Loading channels" />}>
+      <ChannelsView />
+    </Suspense>
+  );
+}
+
+/**
+ * Google sends the browser back here after the consent screen, carrying either
+ * ``?youtube_connected=<channel id>`` or ``?youtube_error=<code>``. The banner reports
+ * whichever actually arrived — a failed consent is never rendered as a success.
+ */
+function OAuthResultBanner() {
+  const params = useSearchParams();
+  const connected = params.get("youtube_connected");
+  const error = params.get("youtube_error");
+
+  if (error) {
+    return (
+      <div
+        role="alert"
+        data-testid="oauth-error"
+        className="rounded-lg border border-danger-500/30 bg-danger-500/10 px-4 py-3 text-sm text-danger-500"
+      >
+        YouTube did not complete the connection:{" "}
+        <code className="font-mono">{error}</code>. Nothing was connected, and NEXORA
+        cannot upload to this channel.
+      </div>
+    );
+  }
+  if (connected) {
+    return (
+      <div
+        data-testid="oauth-connected"
+        className="rounded-lg border border-ok-500/30 bg-ok-500/10 px-4 py-3 text-sm text-ok-500"
+      >
+        Connected to YouTube channel <code className="font-mono">{connected}</code>.
+      </div>
+    );
+  }
+  return null;
+}
+
+function ChannelsView() {
   const channels = useApi<Paged<Channel>>("/api/channels");
   const [creating, setCreating] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   if (channels.status === "loading") return <Loading label="Loading channels" />;
   if (channels.status === "error") return <ErrorNotice message={channels.error.message} />;
 
   return (
     <div className="space-y-5">
+      <OAuthResultBanner />
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-lg font-semibold text-base-100">Channels</h1>
@@ -83,10 +131,24 @@ export default function ChannelsPage() {
                 <p className="mt-2 text-xs text-base-400">
                   {channel.youtube?.detail ?? "No YouTube channel is connected."}
                 </p>
-                <p className="mt-2 text-[11px] text-base-500">
-                  Connecting a channel uses Google OAuth. NEXORA never asks for a YouTube
-                  password. (Available in Phase 5.)
-                </p>
+                <div className="mt-3">
+                  <Button
+                    onClick={() =>
+                      setExpanded((current) => (current === channel.id ? null : channel.id))
+                    }
+                    aria-expanded={expanded === channel.id}
+                  >
+                    {expanded === channel.id ? "Hide connection" : "Manage YouTube"}
+                  </Button>
+                </div>
+                {expanded === channel.id && (
+                  <div className="mt-4">
+                    <YouTubeConnectionCard
+                      channelId={channel.id}
+                      onChanged={channels.refresh}
+                    />
+                  </div>
+                )}
               </div>
             </Card>
           ))}

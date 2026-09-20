@@ -24,7 +24,25 @@ type ChannelSettings = {
   subtitle_burn_in: boolean;
   preferred_voice_id: string | null;
   editorial_notes: string | null;
+  /** Tri-state: `null` means undecided, and undecided blocks publishing. */
+  made_for_kids_default: boolean | null;
+  youtube_category_id: string | null;
 };
+
+/**
+ * YouTube category ids, as the Data API defines them. The list is short on purpose:
+ * these are the categories NEXORA's own content vocabulary maps onto.
+ */
+const YOUTUBE_CATEGORIES: [string, string][] = [
+  ["28", "Science & Technology"],
+  ["27", "Education"],
+  ["25", "News & Politics"],
+  ["22", "People & Blogs"],
+  ["24", "Entertainment"],
+  ["26", "Howto & Style"],
+  ["20", "Gaming"],
+  ["1", "Film & Animation"],
+];
 
 export default function SettingsPage() {
   const user = useApi<CurrentUser>("/api/auth/me");
@@ -184,6 +202,53 @@ function ChannelSettingsCard({ channel }: { channel: Channel }) {
         >
           Burn-in subtitles: {data.subtitle_burn_in ? "ON" : "OFF"}
         </Button>
+      </div>
+
+      <div className="mt-5 border-t border-base-800 pt-4">
+        <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-base-400">
+          YouTube upload defaults
+        </h3>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <Select
+            label="Category"
+            value={data.youtube_category_id ?? ""}
+            options={[["", "Not set"], ...YOUTUBE_CATEGORIES]}
+            disabled={busy}
+            onChange={(value) => patch({ youtube_category_id: value || null })}
+          />
+          <Select
+            label="Made for kids"
+            value={
+              data.made_for_kids_default === null
+                ? "undecided"
+                : data.made_for_kids_default
+                  ? "yes"
+                  : "no"
+            }
+            options={[
+              ["undecided", "NOT DECLARED — blocks publishing"],
+              ["no", "No — not made for kids"],
+              ["yes", "Yes — made for kids"],
+            ]}
+            disabled={busy}
+            onChange={(value) => {
+              if (value === "undecided") return;
+              patch({ made_for_kids_default: value === "yes" });
+            }}
+          />
+        </div>
+
+        <p
+          data-testid="made-for-kids-note"
+          className={`mt-3 text-xs ${
+            data.made_for_kids_default === null ? "text-warn-500" : "text-base-500"
+          }`}
+        >
+          {data.made_for_kids_default === null
+            ? "This channel has not declared whether its videos are made for children. YouTube requires the declaration on every upload and it carries legal weight, so NEXORA blocks publishing until you set it. NEXORA will not guess."
+            : "Every upload from this channel will carry this declaration. Change it here if the channel's audience changes."}
+        </p>
       </div>
     </Card>
   );
